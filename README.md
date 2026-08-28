@@ -32,9 +32,21 @@ bash scripts/install-finder-app.sh
 eddie notes.md            # open a file — starts the server on first use
 eddie a.md b.json         # several files, one browser tab each
 eddie                     # home screen: recent files + file browser
-eddie --status            # is the server running?
-eddie --stop              # stop the server
+eddie status              # is the server running?
+eddie restart             # restart the server (picks up new code)
+eddie stop                # stop the server
 ```
+
+## Upgrade
+
+```bash
+eddie upgrade
+```
+
+That's `git pull` + `npm install` (which rebuilds the frontend) + a server
+restart, in one go. Reload any open editor tabs afterward. (Commands also work
+as flags — `eddie --upgrade` — and a file literally named `upgrade` still
+opens as a file.)
 
 The server listens on `http://127.0.0.1:4517` (change with `EDDIE_PORT` or
 `--port`). Opening a file that doesn't exist yet works — it's created on save.
