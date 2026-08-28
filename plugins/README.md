@@ -20,12 +20,43 @@ Plugins use the global `window.eddie` object:
 | `eddie.openFile(path)` | open another file in this tab |
 | `eddie.setStatus(msg)` | flash a message in the status bar |
 | `eddie.registerFormatter(lang, name, fn)` | make the Format button work for a language; `fn(text, {path})` returns the formatted text (may be async) |
+| `eddie.registerLinter(lang, name, fn, opts?)` | add a linter for a language (see below) |
+| `eddie.relint()` | re-run all linters on the current document |
+| `eddie.openLintConfig()` | open the current language's linter config (what the Lint ⚙ button does) |
 | `eddie.onSave(fn)` | run `fn(text, {path, language})` before every save; return a string to rewrite the content being saved |
 | `eddie.addToolbarButton(label, title, onClick)` | add a button to the top bar |
 | `eddie.addStatusItem(text)` | add a status-bar item; returns the element |
 | `eddie.api(method, url, body)` | call the Eddie server API (see docs/AGENTS.md) |
 
 Language ids: `markdown`, `json`, `shell`, `yaml`, `javascript`, `css`, `html`, `text`.
+
+## Linters
+
+`eddie.registerLinter(language, name, fn, opts)` plugs into the same machinery
+as the built-in markdownlint. `fn(text, ctx)` may be async and returns an array
+of diagnostics, each either 1-based `{line, column?, length?, message,
+severity?, rule?}` (`severity`: `"error" | "warning" | "info"`, default
+warning) or a raw CodeMirror `{from, to, message, severity}` object
+(`ctx.view` is the EditorView if you need to compute offsets).
+
+Config files are handled for you: pass `opts = {configNames, fallback,
+defaultConfig}` and `ctx.config` arrives as `{configPath, content, source}` —
+resolved by walking up from the edited file's directory through `configNames`,
+falling back to `~/.eddie/<fallback>`. The **Lint ⚙** button opens that file
+(creating the fallback from `defaultConfig` if nothing exists), and edits
+apply as soon as you refocus the editor tab.
+
+A minimal shell linter:
+
+```js
+eddie.registerLinter("shell", "no-naked-cd", (text) =>
+  text.split("\n").flatMap((l, i) =>
+    /^\s*cd\s/.test(l) && !l.includes("||")
+      ? [{ line: i + 1, message: "cd without '|| exit' — script continues in the wrong directory on failure", rule: "no-naked-cd" }]
+      : []
+  )
+);
+```
 
 ## Examples
 

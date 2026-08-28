@@ -46,6 +46,15 @@ In the editor:
   (opens automatically for `.md` files)
 - **Format** pretty-prints the document (JSON built in; add formatters for
   other languages via plugins)
+- **Lint** runs as you type: [markdownlint](https://github.com/DavidAnson/markdownlint)
+  for Markdown and syntax checking for JSON, with squiggles, gutter markers, a
+  ⚠ count in the status bar, and a diagnostics panel (**Lint** button). Other
+  languages plug in via `eddie.registerLinter`.
+- **Lint ⚙** opens the linter config. Markdown uses standard
+  `.markdownlint.json` files — the nearest one walking up from your file wins
+  (so per-project configs just work), else `~/.eddie/markdownlint.json`, which
+  Eddie creates with sensible defaults on first use. Edit, save, refocus your
+  document's tab — the new rules apply immediately.
 - **Git** opens a panel with the file's diff, one-box commit, and history;
   the top bar shows the current branch
 

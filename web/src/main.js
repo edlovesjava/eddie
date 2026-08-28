@@ -1,7 +1,7 @@
 // Eddie editor frontend. Bundled with esbuild to /dist/app.js.
 
 import { EditorView, keymap } from "@codemirror/view";
-import { EditorState, Compartment } from "@codemirror/state";
+import { EditorState, Compartment, StateEffect } from "@codemirror/state";
 import { indentWithTab } from "@codemirror/commands";
 import { basicSetup } from "codemirror";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
@@ -13,6 +13,9 @@ import { javascript } from "@codemirror/legacy-modes/mode/javascript";
 import { css as cssMode } from "@codemirror/legacy-modes/mode/css";
 import { html as htmlMode } from "@codemirror/legacy-modes/mode/xml";
 import { oneDark } from "@codemirror/theme-one-dark";
+import { linter, lintGutter, openLintPanel, closeLintPanel, forceLinting, diagnosticCount } from "@codemirror/lint";
+import { jsonParseLinter } from "@codemirror/lang-json";
+import { lint as markdownlint } from "markdownlint/sync";
 import { marked } from "marked";
 
 const $ = (id) => document.getElementById(id);
@@ -26,6 +29,8 @@ const state = {
   previewOn: false,
   formatters: {}, // language -> {name, format}
   saveHooks: [],
+  linters: {}, // language -> [{name, fn, configNames, fallback, defaultConfig}]
+  lintPanelOpen: false,
 };
 
 const langCompartment = new Compartment();
@@ -108,12 +113,20 @@ function createView(content) {
         langCompartment.of(languageExtension(state.language)),
         themeCompartment.of(isDark() ? oneDark : []),
         EditorView.lineWrapping,
+        lintGutter(),
+        linter(lintSource, {
+          delay: 400,
+          needsRefresh: (u) => u.transactions.some((tr) => tr.effects.some((e) => e.is(relintEffect))),
+        }),
+        EditorView.updateListener.of((u) => updateLintStatus(u.state)),
         updateListener,
       ],
     }),
     parent: $("editor"),
   });
+  state.lintPanelOpen = false;
   state.view.focus();
+  forceLinting(state.view);
 }
 
 window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
@@ -216,6 +229,163 @@ async function formatDocument() {
     setStatus(`format failed: ${e.message}`, true);
   }
 }
+
+// ---------- linting ----------
+//
+// Linters are per-language and pluggable. A linter fn gets (text, ctx) where
+// ctx = {path, language, view, config: {configPath, content, source} | null}
+// and returns diagnostics as either
+//   {line, column?, length?, message, severity?, rule?}   (1-based positions)
+// or CodeMirror-style {from, to, message, severity} objects.
+
+function registerLinter(language, name, fn, opts = {}) {
+  (state.linters[language] ||= []).push({ name, fn, ...opts });
+}
+
+// forceLinting alone only fast-tracks an already-queued run; to re-lint an
+// unchanged document (e.g. after a config change) we dispatch this effect,
+// which the linter's needsRefresh hook watches for.
+const relintEffect = StateEffect.define();
+function relint() {
+  if (!state.view) return;
+  state.view.dispatch({ effects: relintEffect.of(null) });
+  forceLinting(state.view);
+}
+
+const lintConfigCache = new Map(); // "<linter>:<file>" -> {at, configPath, content, source}
+
+async function resolveLinterConfig(l, fresh = false) {
+  if (!l.configNames || !state.path) return null;
+  const key = `${l.name}:${state.path}`;
+  const hit = lintConfigCache.get(key);
+  if (!fresh && hit && Date.now() - hit.at < 5000) return hit;
+  const q = new URLSearchParams({
+    path: state.path,
+    names: l.configNames.join(","),
+    fallback: l.fallback || "",
+  });
+  const data = await api("GET", `/api/lint/config?${q}`);
+  const entry = { at: Date.now(), ...data };
+  lintConfigCache.set(key, entry);
+  return entry;
+}
+
+// Tolerant JSON for config files (.jsonc: // and /* */ comments allowed).
+function parseJsonc(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return JSON.parse(text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, ""));
+  }
+}
+
+function toCmDiagnostic(view, d, source) {
+  if (typeof d.from === "number") return { severity: "warning", source, ...d };
+  const doc = view.state.doc;
+  const line = doc.line(Math.max(1, Math.min(d.line || 1, doc.lines)));
+  const col = Math.min((d.column || 1) - 1, line.length);
+  const from = line.from + col;
+  const to = d.length ? Math.min(from + d.length, line.to) : line.to;
+  return {
+    from,
+    to: Math.max(from, to),
+    severity: d.severity || "warning",
+    message: d.message,
+    source: d.rule ? `${source}:${d.rule}` : source,
+  };
+}
+
+async function lintSource(view) {
+  const diagnostics = [];
+  for (const l of state.linters[state.language] || []) {
+    try {
+      const config = await resolveLinterConfig(l);
+      const results = await l.fn(view.state.doc.toString(), {
+        path: state.path,
+        language: state.language,
+        view,
+        config,
+      });
+      for (const d of results || []) diagnostics.push(toCmDiagnostic(view, d, l.name));
+    } catch (e) {
+      console.warn(`linter ${l.name} failed:`, e);
+    }
+  }
+  return diagnostics.sort((a, b) => a.from - b.from);
+}
+
+function updateLintStatus(editorState) {
+  const n = diagnosticCount(editorState);
+  const el = $("status-lint");
+  el.textContent = n ? `⚠ ${n}` : "";
+  el.title = n ? `${n} lint issue${n === 1 ? "" : "s"} — click to show` : "";
+}
+
+function toggleLintPanel() {
+  if (!state.view) return;
+  state.lintPanelOpen = !state.lintPanelOpen;
+  (state.lintPanelOpen ? openLintPanel : closeLintPanel)(state.view);
+  state.view.focus();
+}
+
+async function openLintConfig() {
+  const l = (state.linters[state.language] || []).find((x) => x.configNames);
+  if (!l) return setStatus(`no configurable linter for ${state.language}`);
+  const cfg = await resolveLinterConfig(l, true);
+  if (!cfg || !cfg.configPath) return setStatus(`${l.name} has no config location`);
+  if (cfg.content == null) {
+    await api("PUT", "/api/file", {
+      path: cfg.configPath,
+      content: JSON.stringify(l.defaultConfig || {}, null, 2) + "\n",
+    });
+    setStatus(`created ${cfg.configPath}`);
+  }
+  window.open(`/?file=${encodeURIComponent(cfg.configPath)}`, "_blank");
+}
+
+// Re-lint with a fresh config when the tab regains focus (e.g. after editing
+// the config in another tab) and after every save.
+window.addEventListener("focus", () => {
+  lintConfigCache.clear();
+  relint();
+});
+
+// Built-in: markdownlint with standard .markdownlint.json config resolution.
+registerLinter(
+  "markdown",
+  "markdownlint",
+  (text, { config }) => {
+    let cfg = { default: true };
+    if (config && config.content != null) {
+      try {
+        cfg = parseJsonc(config.content);
+      } catch {
+        setStatus(`bad JSON in ${config.configPath}`, true);
+      }
+    }
+    const result = markdownlint({ strings: { doc: text }, config: cfg });
+    return result.doc.map((e) => ({
+      line: e.lineNumber,
+      column: e.errorRange ? e.errorRange[0] : 1,
+      length: e.errorRange ? e.errorRange[1] : undefined,
+      severity: "warning",
+      rule: e.ruleNames[0],
+      message:
+        `${e.ruleNames.slice(0, 2).join("/")}: ${e.ruleDescription}` +
+        (e.errorDetail ? ` [${e.errorDetail}]` : ""),
+    }));
+  },
+  {
+    configNames: [".markdownlint.json", ".markdownlint.jsonc"],
+    fallback: "markdownlint.json",
+    defaultConfig: { default: true, MD013: false, MD033: false, MD041: false },
+  }
+);
+
+// Built-in: JSON syntax checking.
+registerLinter("json", "json-parse", (text, { view }) =>
+  text.trim() ? jsonParseLinter()(view).map((d) => ({ ...d, severity: "error" })) : []
+);
 
 // ---------- git ----------
 
@@ -346,6 +516,9 @@ const eddie = {
   openFile,
   api,
   registerFormatter,
+  registerLinter,
+  relint,
+  openLintConfig,
   onSave: (fn) => state.saveHooks.push(fn),
   addToolbarButton: (label, title, onClick) => {
     const b = document.createElement("button");
@@ -383,6 +556,9 @@ async function loadPlugins() {
 $("btn-save").onclick = save;
 $("btn-preview").onclick = togglePreview;
 $("btn-format").onclick = formatDocument;
+$("btn-lint").onclick = toggleLintPanel;
+$("btn-lint-config").onclick = openLintConfig;
+$("status-lint").onclick = toggleLintPanel;
 $("btn-git").onclick = () => {
   const p = $("git-panel");
   p.hidden = !p.hidden;

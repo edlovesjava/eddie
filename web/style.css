@@ -124,4 +124,8 @@ button:hover { border-color: var(--accent); color: var(--accent); }
 #home .dir { color: var(--accent); }
 #home .meta { color: var(--muted); font-size: 12px; margin-left: 8px; }
 #browser-path { color: var(--muted); font-family: ui-monospace, monospace; font-size: 12px; margin-bottom: 6px; }
+#status-lint { color: #b45309; cursor: pointer; }
+#status-lint:empty { display: none; }
+@media (prefers-color-scheme: dark) { #status-lint { color: #fbbf24; } }
+.cm-panel.cm-panel-lint ul { max-height: 140px; }
 code { background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; }

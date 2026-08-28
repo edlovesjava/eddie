@@ -34,6 +34,15 @@ All paths are absolute (a leading `~` is expanded). Responses are JSON.
 - `GET /api/git/log?path=…` → `{root, log: [{hash, author, when, subject}]}`
 - `POST /api/git/commit` with `{"path": "…", "message": "…"}` → stages and commits that one file
 
+### Linting
+
+- `GET /api/lint/config?path=…&names=.markdownlint.json,.markdownlint.jsonc&fallback=markdownlint.json`
+  → `{configPath, content, source}` where `source` is `project` (found walking
+  up from the file, stopping at `$HOME`), `user` (`~/.eddie/<fallback>`), or
+  `none` (`configPath` then names where the fallback would go).
+  Linting itself runs in the browser; an agent changes behavior by writing the
+  config file with `PUT /api/file` — the editor picks it up on tab refocus.
+
 ### Remote sources
 
 - `GET /api/fetch?url=https://…` → `{ok, status, content}` — read-only fetch,

@@ -263,6 +263,41 @@ const api = {
       .on("error", (e) => json(res, 502, { ok: false, error: e.message }));
   },
 
+  "GET /api/lint/config": async (req, res, url) => {
+    // Resolve a linter's config file for a given document: walk up from the
+    // file's directory looking for any of `names` (comma-separated), stopping
+    // at the home directory or filesystem root; fall back to ~/.eddie/<fallback>.
+    const file = resolvePath(url.searchParams.get("path"));
+    const names = (url.searchParams.get("names") || "").split(",").filter(Boolean);
+    const fallback = url.searchParams.get("fallback");
+    const home = os.homedir();
+    let dir = path.dirname(file);
+    while (true) {
+      for (const name of names) {
+        const p = path.join(dir, name);
+        try {
+          const content = await fsp.readFile(p, "utf8");
+          return json(res, 200, { configPath: p, content, source: "project" });
+        } catch {
+          /* keep walking */
+        }
+      }
+      const parent = path.dirname(dir);
+      if (parent === dir || dir === home) break;
+      dir = parent;
+    }
+    if (fallback && !fallback.includes("/") && !fallback.includes("..")) {
+      const p = path.join(EDDIE_HOME, fallback);
+      try {
+        const content = await fsp.readFile(p, "utf8");
+        return json(res, 200, { configPath: p, content, source: "user" });
+      } catch {
+        return json(res, 200, { configPath: p, content: null, source: "none" });
+      }
+    }
+    json(res, 200, { configPath: null, content: null, source: "none" });
+  },
+
   "GET /api/plugins": async (req, res) => {
     json(res, 200, { plugins: await listPlugins(), userPluginDir: USER_PLUGIN_DIR });
   },

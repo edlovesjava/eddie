@@ -23,10 +23,12 @@
     "@codemirror/lang-markdown": "^6.2.5",
     "@codemirror/language": "^6.10.2",
     "@codemirror/legacy-modes": "^6.4.0",
+    "@codemirror/lint": "^6.9.7",
     "@codemirror/state": "^6.4.1",
     "@codemirror/theme-one-dark": "^6.1.2",
     "@codemirror/view": "^6.28.0",
     "codemirror": "^6.0.1",
+    "markdownlint": "^0.41.1",
     "marked": "^12.0.2"
   },
   "devDependencies": {
