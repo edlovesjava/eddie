@@ -72,7 +72,9 @@ In the editor:
   the panel says how many commits you're ahead/behind, and the top-bar badge
   shows the branch plus `↑n` when there's something to push (`git push` runs
   with your normal local credentials; a branch with no upstream gets
-  `--set-upstream origin <branch>` automatically)
+  `--set-upstream origin <branch>` automatically). The panel shows which
+  identity and remote a push will use — for juggling work/personal/school
+  GitHub accounts per repo, see [docs/GIT-ACCOUNTS.md](docs/GIT-ACCOUNTS.md)
 - **Slash commands**, inline or from the palette. Type `/table 3x4` (or
   `/link`, `/date`, `/hr`) in the document and hit Enter — the command text is
   replaced by its output. Or press **Cmd+K** (or the `/` toolbar button) for a

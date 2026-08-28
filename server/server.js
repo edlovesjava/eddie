@@ -198,6 +198,11 @@ const api = {
     let ahead = null;
     let behind = null;
     if (counts.ok) [behind, ahead] = counts.stdout.trim().split(/\s+/).map(Number);
+    // Which identity/remote a push from this repo would use (honors
+    // per-directory includeIf configs, so it can differ between repos).
+    const userName = await git(["config", "user.name"], root);
+    const userEmail = await git(["config", "user.email"], root);
+    const remote = await git(["remote", "get-url", "--push", "origin"], root);
     json(res, 200, {
       root,
       branch: branch.ok ? branch.stdout.trim() : null,
@@ -205,6 +210,9 @@ const api = {
       ahead,
       behind,
       hasUpstream: counts.ok,
+      userName: userName.ok ? userName.stdout.trim() : null,
+      userEmail: userEmail.ok ? userEmail.stdout.trim() : null,
+      remote: remote.ok ? remote.stdout.trim() : null,
     });
   },
 

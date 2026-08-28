@@ -640,7 +640,15 @@ async function refreshGitPanel() {
     api("GET", `/api/git/diff?path=${encodeURIComponent(state.path)}`),
     api("GET", `/api/git/log?path=${encodeURIComponent(state.path)}`),
   ]);
-  $("git-detail").textContent = `${info.root} @ ${info.branch} — file: ${info.fileStatus}`;
+  $("git-detail").innerHTML = "";
+  const repoLine = document.createElement("div");
+  repoLine.textContent = `${info.root} @ ${info.branch} — file: ${info.fileStatus}`;
+  const idLine = document.createElement("div");
+  idLine.className = "git-identity";
+  idLine.textContent = info.userName
+    ? `as ${info.userName} <${info.userEmail || "no email"}>` + (info.remote ? ` → ${info.remote}` : " (no origin remote)")
+    : "no git identity configured for this repo";
+  $("git-detail").append(repoLine, idLine);
   $("git-diff").textContent = diff.diff || "(no unstaged changes)";
   $("git-sync").textContent = !info.hasUpstream
     ? "no upstream — Push will publish this branch"
