@@ -31,8 +31,12 @@ All paths are absolute (a leading `~` is expanded). Responses are JSON.
 - `GET /api/git/info?path=…` → `{root, branch, fileStatus}` (`fileStatus` is `clean` or porcelain codes)
 - `GET /api/git/status?path=…` → `{root, status}` (porcelain, whole repo)
 - `GET /api/git/diff?path=…` → `{root, diff}` (unstaged diff for that file)
-- `GET /api/git/log?path=…` → `{root, log: [{hash, author, when, subject}]}`
+- `GET /api/git/log?path=…` → `{root, log: [{hash, author, when, subject, unpushed}], hasUpstream}`
+  (`unpushed` = not on the upstream; everything is unpushed when the branch has no upstream)
+- `GET /api/git/info` also reports `ahead`, `behind`, and `hasUpstream`
 - `POST /api/git/commit` with `{"path": "…", "message": "…"}` → stages and commits that one file
+- `POST /api/git/push` with `{"path": "…"}` → `git push` from that file's repo
+  (adds `--set-upstream origin <branch>` when the branch has no upstream)
 
 ### Linting
 

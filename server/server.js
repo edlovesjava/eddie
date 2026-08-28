@@ -194,10 +194,17 @@ const api = {
     if (!root) return json(res, 200, { root: null });
     const branch = await git(["rev-parse", "--abbrev-ref", "HEAD"], root);
     const status = await git(["status", "--porcelain", "--", file], root);
+    const counts = await git(["rev-list", "--left-right", "--count", "@{u}...HEAD"], root);
+    let ahead = null;
+    let behind = null;
+    if (counts.ok) [behind, ahead] = counts.stdout.trim().split(/\s+/).map(Number);
     json(res, 200, {
       root,
       branch: branch.ok ? branch.stdout.trim() : null,
       fileStatus: status.stdout.trim() || "clean",
+      ahead,
+      behind,
+      hasUpstream: counts.ok,
     });
   },
 
@@ -221,15 +228,33 @@ const api = {
     const file = resolvePath(url.searchParams.get("path"));
     const root = await gitRoot(file);
     if (!root) return json(res, 200, { root: null, log: [] });
-    const r = await git(["log", "--pretty=format:%h%x1f%an%x1f%ar%x1f%s", "-n", "20", "--", file], root);
+    const r = await git(["log", "--pretty=format:%H%x1f%h%x1f%an%x1f%ar%x1f%s", "-n", "20", "--", file], root);
+    // Commits the upstream doesn't have yet; if there's no upstream at all,
+    // nothing has ever been pushed, so everything counts as unpushed.
+    const up = await git(["rev-list", "@{u}..HEAD"], root);
+    const unpushedSet = new Set(up.ok ? up.stdout.split("\n").filter(Boolean) : []);
     const log = r.stdout
       .split("\n")
       .filter(Boolean)
       .map((l) => {
-        const [hash, author, when, subject] = l.split(String.fromCharCode(31));
-        return { hash, author, when, subject };
+        const [full, hash, author, when, subject] = l.split(String.fromCharCode(31));
+        return { hash, author, when, subject, unpushed: !up.ok || unpushedSet.has(full) };
       });
-    json(res, 200, { root, log });
+    json(res, 200, { root, log, hasUpstream: up.ok });
+  },
+
+  "POST /api/git/push": async (req, res) => {
+    const body = JSON.parse((await readBody(req)).toString("utf8"));
+    const file = resolvePath(body.path);
+    const root = await gitRoot(file);
+    if (!root) return json(res, 400, { ok: false, error: "not in a git repository" });
+    let push = await git(["push"], root);
+    if (!push.ok && /no upstream|set-upstream|does not match any/i.test(push.stderr)) {
+      const branch = await git(["rev-parse", "--abbrev-ref", "HEAD"], root);
+      push = await git(["push", "--set-upstream", "origin", branch.stdout.trim()], root);
+    }
+    if (!push.ok) return json(res, 500, { ok: false, error: (push.stderr || push.stdout).trim() });
+    json(res, 200, { ok: true, output: (push.stderr || push.stdout).trim() || "pushed" });
   },
 
   "POST /api/git/commit": async (req, res) => {
