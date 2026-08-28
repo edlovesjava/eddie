@@ -110,8 +110,20 @@ button:hover { border-color: var(--accent); color: var(--accent); }
   background: var(--bg);
   color: var(--fg);
 }
+.git-actions { display: flex; gap: 6px; }
+#git-sync { font-size: 12px; color: var(--muted); margin: 8px 0 4px; }
 #git-log { font-size: 12px; }
 #git-log .entry { padding: 4px 0; border-bottom: 1px solid var(--border); }
+#git-log .badge {
+  font-size: 10px;
+  color: #b45309;
+  border: 1px solid #b45309;
+  border-radius: 8px;
+  padding: 0 6px;
+  margin-left: 6px;
+  vertical-align: 1px;
+}
+@media (prefers-color-scheme: dark) { #git-log .badge { color: #fbbf24; border-color: #fbbf24; } }
 #git-log .hash { color: var(--accent); font-family: ui-monospace, monospace; margin-right: 6px; }
 #git-log .meta { color: var(--muted); font-size: 11px; }
 
@@ -124,6 +136,49 @@ button:hover { border-color: var(--accent); color: var(--accent); }
 #home .dir { color: var(--accent); }
 #home .meta { color: var(--muted); font-size: 12px; margin-left: 8px; }
 #browser-path { color: var(--muted); font-family: ui-monospace, monospace; font-size: 12px; margin-bottom: 6px; }
+#palette, #linkpick {
+  position: fixed;
+  top: 12vh;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(560px, 90vw);
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .25);
+  z-index: 100;
+  overflow: hidden;
+}
+#palette[hidden], #linkpick[hidden] { display: none; }
+#palette-input {
+  font: inherit;
+  font-size: 15px;
+  padding: 10px 14px;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  outline: none;
+}
+#palette-list, #linkpick-list { list-style: none; margin: 0; padding: 4px; overflow: auto; }
+#palette-list li, #linkpick-list li {
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+#palette-list li.sel, #palette-list li:hover, #linkpick-list li:hover { background: var(--border); }
+#palette-list .cmd { font-family: ui-monospace, monospace; color: var(--accent); }
+#palette-list .hint, #linkpick .meta { color: var(--muted); font-size: 12px; margin-left: auto; }
+.pick-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--border); font-weight: 600; }
+.pick-head button { border: none; background: none; font-size: 14px; }
+#linkpick-path { padding: 4px 12px; color: var(--muted); font-family: ui-monospace, monospace; font-size: 11px; word-break: break-all; }
+#linkpick-list .dir { color: var(--accent); }
 #status-lint { color: #b45309; cursor: pointer; }
 #status-lint:empty { display: none; }
 @media (prefers-color-scheme: dark) { #status-lint { color: #fbbf24; } }

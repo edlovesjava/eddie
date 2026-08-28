@@ -21,6 +21,9 @@ Plugins use the global `window.eddie` object:
 | `eddie.setStatus(msg)` | flash a message in the status bar |
 | `eddie.registerFormatter(lang, name, fn)` | make the Format button work for a language; `fn(text, {path})` returns the formatted text (may be async) |
 | `eddie.registerLinter(lang, name, fn, opts?)` | add a linter for a language (see below) |
+| `eddie.registerCommand(name, {title, hint, run})` | add a slash command (see below) |
+| `eddie.runCommand(name, args)` | invoke any command programmatically |
+| `eddie.pickFile(startDir?)` | show the file-picker dialog; resolves to a path or null |
 | `eddie.relint()` | re-run all linters on the current document |
 | `eddie.openLintConfig()` | open the current language's linter config (what the Lint ⚙ button does) |
 | `eddie.onSave(fn)` | run `fn(text, {path, language})` before every save; return a string to rewrite the content being saved |
@@ -29,6 +32,32 @@ Plugins use the global `window.eddie` object:
 | `eddie.api(method, url, body)` | call the Eddie server API (see docs/AGENTS.md) |
 
 Language ids: `markdown`, `json`, `shell`, `yaml`, `javascript`, `css`, `html`, `text`.
+
+## Slash commands
+
+Commands run inline (`/name args` + Enter in the document — the typed command
+is replaced by whatever the command inserts) and from the Cmd+K palette.
+`run(args, ctx)` may be async; `args` is the raw argument string, and `ctx`
+has `insert(text)` (at the cursor, replacing any selection), `view`, `path`,
+`language`, `pickFile`, `api`, and `setStatus`.
+
+```js
+eddie.registerCommand("sig", {
+  title: "Insert my signature",
+  run: (args, ctx) => ctx.insert("— Ed\n"),
+});
+
+eddie.registerCommand("embed", {
+  title: "Embed another file as a code block",
+  hint: "opens a file picker",
+  run: async (args, ctx) => {
+    const p = await ctx.pickFile();
+    if (!p) return;
+    const { content } = await ctx.api("GET", `/api/file?path=${encodeURIComponent(p)}`);
+    ctx.insert("```\n" + content + "```\n");
+  },
+});
+```
 
 ## Linters
 

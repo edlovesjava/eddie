@@ -1,7 +1,7 @@
 // Eddie editor frontend. Bundled with esbuild to /dist/app.js.
 
 import { EditorView, keymap } from "@codemirror/view";
-import { EditorState, Compartment, StateEffect } from "@codemirror/state";
+import { EditorState, Compartment, StateEffect, Prec } from "@codemirror/state";
 import { indentWithTab } from "@codemirror/commands";
 import { basicSetup } from "codemirror";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
@@ -104,6 +104,7 @@ function createView(content) {
     state: EditorState.create({
       doc: content,
       extensions: [
+        Prec.high(keymap.of([{ key: "Enter", run: maybeRunInlineCommand }])),
         basicSetup,
         keymap.of([
           { key: "Mod-s", preventDefault: true, run: () => (save(), true) },
@@ -229,6 +230,222 @@ async function formatDocument() {
     setStatus(`format failed: ${e.message}`, true);
   }
 }
+
+// ---------- slash commands ----------
+//
+// Commands run from two places: typed inline ("/table 3x4" + Enter — the
+// command text is replaced by its output) or from the Cmd+K palette.
+// Plugins add their own with eddie.registerCommand(name, {title, hint, run}).
+
+const commands = new Map();
+
+function registerCommand(name, spec) {
+  commands.set(name.toLowerCase().replace(/^\//, ""), { name, ...spec });
+}
+
+function insertAtCursor(text) {
+  const v = state.view;
+  if (!v) return setStatus("open a file first");
+  const r = v.state.selection.main;
+  v.dispatch({
+    changes: { from: r.from, to: r.to, insert: text },
+    selection: { anchor: r.from + text.length },
+  });
+  v.focus();
+}
+
+function commandCtx() {
+  return {
+    insert: insertAtCursor,
+    view: state.view,
+    path: state.path,
+    language: state.language,
+    pickFile,
+    api,
+    setStatus,
+  };
+}
+
+async function runCommand(name, args = "") {
+  const cmd = commands.get(name.toLowerCase().replace(/^\//, ""));
+  if (!cmd) return setStatus(`unknown command /${name}`);
+  try {
+    await cmd.run(args.trim(), commandCtx());
+  } catch (e) {
+    setStatus(`/${name} failed: ${e.message}`, true);
+  }
+}
+
+function maybeRunInlineCommand(view) {
+  const { head, empty } = view.state.selection.main;
+  if (!empty) return false;
+  const line = view.state.doc.lineAt(head);
+  const before = view.state.sliceDoc(line.from, head);
+  const m = before.match(/(?:^|\s)\/([a-z][\w-]*)(?:[ \t]+(\S[^\n]*?))?[ \t]*$/i);
+  if (!m || !commands.has(m[1].toLowerCase())) return false;
+  const start = line.from + m.index + (m[0].startsWith("/") ? 0 : 1);
+  view.dispatch({ changes: { from: start, to: head } });
+  runCommand(m[1], m[2] || "");
+  return true;
+}
+
+// --- command palette (Cmd+K) ---
+
+let paletteSel = 0;
+
+function paletteMatches(query) {
+  const q = query.toLowerCase().replace(/^\//, "");
+  return [...commands.values()].filter((c) => c.name.toLowerCase().includes(q) || (c.title || "").toLowerCase().includes(q));
+}
+
+function renderPalette() {
+  const [q] = $("palette-input").value.replace(/^\//, "").split(/\s+/, 1);
+  const matches = paletteMatches(q || "");
+  paletteSel = Math.min(paletteSel, Math.max(0, matches.length - 1));
+  const ul = $("palette-list");
+  ul.innerHTML = "";
+  matches.forEach((c, i) => {
+    const li = document.createElement("li");
+    if (i === paletteSel) li.className = "sel";
+    const cmd = document.createElement("span");
+    cmd.className = "cmd";
+    cmd.textContent = `/${c.name}`;
+    const title = document.createElement("span");
+    title.textContent = c.title || "";
+    const hint = document.createElement("span");
+    hint.className = "hint";
+    hint.textContent = c.hint || "";
+    li.append(cmd, title, hint);
+    li.onclick = () => runPaletteSelection(i);
+    ul.appendChild(li);
+  });
+  return matches;
+}
+
+function openPalette() {
+  paletteSel = 0;
+  $("palette").hidden = false;
+  const input = $("palette-input");
+  input.value = "/";
+  renderPalette();
+  input.focus();
+}
+
+function closePalette() {
+  $("palette").hidden = true;
+  if (state.view) state.view.focus();
+}
+
+function runPaletteSelection(index) {
+  const matches = renderPalette();
+  const pick = matches[index ?? paletteSel];
+  if (!pick) return;
+  const args = $("palette-input").value.replace(/^\//, "").split(/\s+/).slice(1).join(" ");
+  closePalette();
+  runCommand(pick.name, args);
+}
+
+// --- file picker (used by /link; available to plugins as ctx.pickFile) ---
+
+let pickResolve = null;
+
+function pickFile(startDir) {
+  $("linkpick").hidden = false;
+  pickBrowse(startDir || dirname(state.path || "~"));
+  return new Promise((resolve) => (pickResolve = resolve));
+}
+
+function closePick(result) {
+  $("linkpick").hidden = true;
+  if (pickResolve) {
+    pickResolve(result || null);
+    pickResolve = null;
+  }
+  if (state.view) state.view.focus();
+}
+
+async function pickBrowse(dir) {
+  const data = await api("GET", `/api/list?path=${encodeURIComponent(dir)}`);
+  $("linkpick-path").textContent = data.path;
+  const ul = $("linkpick-list");
+  ul.innerHTML = "";
+  const up = document.createElement("li");
+  up.innerHTML = '<span class="dir">..</span>';
+  up.onclick = () => pickBrowse(data.parent);
+  ul.appendChild(up);
+  for (const e of data.entries) {
+    const li = document.createElement("li");
+    const name = document.createElement("span");
+    name.textContent = e.name + (e.dir ? "/" : "");
+    if (e.dir) name.className = "dir";
+    li.appendChild(name);
+    if (!e.dir && e.language && e.language !== "text") {
+      const meta = document.createElement("span");
+      meta.className = "meta";
+      meta.textContent = e.language;
+      li.appendChild(meta);
+    }
+    li.onclick = () => (e.dir ? pickBrowse(e.path) : closePick(e.path));
+    ul.appendChild(li);
+  }
+}
+
+// --- path helpers ---
+
+function dirname(p) {
+  const i = p.lastIndexOf("/");
+  return i > 0 ? p.slice(0, i) : "/";
+}
+
+function relPath(fromDir, to) {
+  const a = fromDir.split("/").filter(Boolean);
+  const b = to.split("/").filter(Boolean);
+  let i = 0;
+  while (i < a.length && a[i] === b[i]) i++;
+  return [...Array(a.length - i).fill(".."), ...b.slice(i)].join("/") || ".";
+}
+
+// --- built-in commands ---
+
+registerCommand("link", {
+  title: "Insert a link to another doc",
+  hint: "opens a file picker",
+  run: async (args, ctx) => {
+    const target = await ctx.pickFile();
+    if (!target) return;
+    const label = target.split("/").pop().replace(/\.[^.]+$/, "");
+    const href = state.path ? relPath(dirname(state.path), target) : target;
+    ctx.insert(`[${label}](${encodeURI(href)})`);
+  },
+});
+
+registerCommand("table", {
+  title: "Insert a markdown table",
+  hint: "/table 3x4 (rows x cols)",
+  run: (args, ctx) => {
+    const m = args.match(/(\d+)\s*[x×*]\s*(\d+)/i);
+    const rows = Math.min(m ? parseInt(m[1], 10) : 3, 100);
+    const cols = Math.min(m ? parseInt(m[2], 10) : 3, 20);
+    const row = (cells) => `| ${cells.join(" | ")} |`;
+    const lines = [
+      row(Array.from({ length: cols }, (_, i) => `Col ${i + 1}`)),
+      row(Array(cols).fill("---")),
+      ...Array.from({ length: Math.max(rows - 1, 1) }, () => row(Array(cols).fill("   "))),
+    ];
+    ctx.insert(lines.join("\n") + "\n");
+  },
+});
+
+registerCommand("date", {
+  title: "Insert today's date",
+  hint: "YYYY-MM-DD",
+  run: (args, ctx) => ctx.insert(new Date().toISOString().slice(0, 10)),
+});
+
+registerCommand("hr", {
+  title: "Insert a horizontal rule",
+  run: (args, ctx) => ctx.insert("\n---\n"),
+});
 
 // ---------- linting ----------
 //
@@ -401,7 +618,10 @@ async function refreshGitInfo() {
     }
     state.gitRoot = info.root;
     el.hidden = false;
-    el.textContent = `${info.branch}${info.fileStatus === "clean" ? "" : " *"}`;
+    el.textContent =
+      `${info.branch}${info.fileStatus === "clean" ? "" : " *"}` +
+      (info.ahead ? ` ↑${info.ahead}` : "") +
+      (info.behind ? ` ↓${info.behind}` : "");
     if (!$("git-panel").hidden) refreshGitPanel();
   } catch {
     /* non-fatal */
@@ -422,6 +642,14 @@ async function refreshGitPanel() {
   ]);
   $("git-detail").textContent = `${info.root} @ ${info.branch} — file: ${info.fileStatus}`;
   $("git-diff").textContent = diff.diff || "(no unstaged changes)";
+  $("git-sync").textContent = !info.hasUpstream
+    ? "no upstream — Push will publish this branch"
+    : info.ahead || info.behind
+      ? `${info.ahead ? `${info.ahead} commit${info.ahead === 1 ? "" : "s"} to push` : ""}` +
+        `${info.ahead && info.behind ? ", " : ""}` +
+        `${info.behind ? `${info.behind} behind upstream` : ""}`
+      : "in sync with upstream";
+  $("btn-push").textContent = info.ahead ? `Push ↑${info.ahead}` : "Push";
   $("git-log").innerHTML = "";
   for (const e of log.log) {
     const div = document.createElement("div");
@@ -431,11 +659,34 @@ async function refreshGitPanel() {
     hash.textContent = e.hash;
     const subject = document.createElement("span");
     subject.textContent = e.subject;
+    div.append(hash, subject);
+    if (e.unpushed) {
+      const badge = document.createElement("span");
+      badge.className = "badge";
+      badge.textContent = "unpushed";
+      div.appendChild(badge);
+    }
     const meta = document.createElement("div");
     meta.className = "meta";
     meta.textContent = `${e.author}, ${e.when}`;
-    div.append(hash, subject, meta);
+    div.appendChild(meta);
     $("git-log").appendChild(div);
+  }
+}
+
+async function pushChanges() {
+  const btn = $("btn-push");
+  btn.disabled = true;
+  btn.textContent = "Pushing…";
+  try {
+    const r = await api("POST", "/api/git/push", { path: state.path });
+    setStatus(r.output.split("\n").pop() || "pushed");
+  } catch (e) {
+    setStatus(`push failed: ${e.message}`, true);
+  } finally {
+    btn.disabled = false;
+    refreshGitInfo();
+    refreshGitPanel();
   }
 }
 
@@ -517,6 +768,9 @@ const eddie = {
   api,
   registerFormatter,
   registerLinter,
+  registerCommand,
+  runCommand,
+  pickFile,
   relint,
   openLintConfig,
   onSave: (fn) => state.saveHooks.push(fn),
@@ -559,12 +813,32 @@ $("btn-format").onclick = formatDocument;
 $("btn-lint").onclick = toggleLintPanel;
 $("btn-lint-config").onclick = openLintConfig;
 $("status-lint").onclick = toggleLintPanel;
+$("btn-palette").onclick = openPalette;
+$("linkpick-close").onclick = () => closePick(null);
+
+$("palette-input").addEventListener("keydown", (e) => {
+  if (e.key === "ArrowDown") (paletteSel++, renderPalette(), e.preventDefault());
+  else if (e.key === "ArrowUp") (paletteSel = Math.max(0, paletteSel - 1), renderPalette(), e.preventDefault());
+  else if (e.key === "Enter") (runPaletteSelection(), e.preventDefault());
+});
+$("palette-input").addEventListener("input", () => ((paletteSel = 0), renderPalette()));
+
+document.addEventListener("keydown", (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+    e.preventDefault();
+    $("palette").hidden ? openPalette() : closePalette();
+  } else if (e.key === "Escape") {
+    if (!$("linkpick").hidden) closePick(null);
+    else if (!$("palette").hidden) closePalette();
+  }
+});
 $("btn-git").onclick = () => {
   const p = $("git-panel");
   p.hidden = !p.hidden;
   if (!p.hidden) refreshGitPanel();
 };
 $("btn-commit").onclick = commitFile;
+$("btn-push").onclick = pushChanges;
 
 window.addEventListener("beforeunload", (e) => {
   if (state.dirty) e.preventDefault();

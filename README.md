@@ -67,8 +67,18 @@ In the editor:
   (so per-project configs just work), else `~/.eddie/markdownlint.json`, which
   Eddie creates with sensible defaults on first use. Edit, save, refocus your
   document's tab — the new rules apply immediately.
-- **Git** opens a panel with the file's diff, one-box commit, and history;
-  the top bar shows the current branch
+- **Git** opens a panel with the file's diff, one-box commit, history, and
+  **Push**. Commits that haven't reached the upstream are tagged `unpushed`,
+  the panel says how many commits you're ahead/behind, and the top-bar badge
+  shows the branch plus `↑n` when there's something to push (`git push` runs
+  with your normal local credentials; a branch with no upstream gets
+  `--set-upstream origin <branch>` automatically)
+- **Slash commands**, inline or from the palette. Type `/table 3x4` (or
+  `/link`, `/date`, `/hr`) in the document and hit Enter — the command text is
+  replaced by its output. Or press **Cmd+K** (or the `/` toolbar button) for a
+  filterable command palette that works the same way. `/link` opens a
+  Finder-style file picker and inserts a relative markdown link to the chosen
+  doc. Plugins add their own commands via `eddie.registerCommand`
 
 ## Languages
 

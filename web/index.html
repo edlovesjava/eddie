@@ -15,6 +15,7 @@
     <span id="git-info" hidden></span>
     <span class="spacer"></span>
     <span id="toolbar"></span>
+    <button id="btn-palette" title="Command palette (Cmd+K) — /link, /table …">/</button>
     <button id="btn-lint" title="Toggle lint panel">Lint</button>
     <button id="btn-lint-config" title="Edit the linter config for this language">Lint ⚙</button>
     <button id="btn-format" title="Format document">Format</button>
@@ -31,11 +32,29 @@
       <div id="git-detail">not in a git repository</div>
       <pre id="git-diff"></pre>
       <input id="commit-msg" type="text" placeholder="commit message">
-      <button id="btn-commit">Commit file</button>
+      <div class="git-actions">
+        <button id="btn-commit">Commit file</button>
+        <button id="btn-push">Push</button>
+      </div>
+      <div id="git-sync"></div>
       <h3>history</h3>
       <div id="git-log"></div>
     </aside>
   </main>
+
+  <div id="palette" hidden>
+    <input id="palette-input" type="text" placeholder="/command args — e.g. table 3x4" autocomplete="off" spellcheck="false">
+    <ul id="palette-list"></ul>
+  </div>
+
+  <div id="linkpick" hidden>
+    <div class="pick-head">
+      <span>Pick a file to link</span>
+      <button id="linkpick-close" title="Cancel (Esc)">✕</button>
+    </div>
+    <div id="linkpick-path"></div>
+    <ul id="linkpick-list"></ul>
+  </div>
 
   <div id="home" hidden>
     <h1>eddie</h1>
