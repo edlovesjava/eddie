@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>eddie</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✏️</text></svg>">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header id="topbar">
+    <span id="logo">eddie</span>
+    <span id="filename" title="">no file</span>
+    <span id="dirty" hidden>●</span>
+    <span id="git-info" hidden></span>
+    <span class="spacer"></span>
+    <span id="toolbar"></span>
+    <button id="btn-format" title="Format document">Format</button>
+    <button id="btn-preview" title="Toggle preview (Cmd+Shift+P)">Preview</button>
+    <button id="btn-git" title="Git panel">Git</button>
+    <button id="btn-save" title="Save (Cmd+S)">Save</button>
+  </header>
+
+  <main id="main">
+    <div id="editor"></div>
+    <div id="preview" hidden></div>
+    <aside id="git-panel" hidden>
+      <h3>git</h3>
+      <div id="git-detail">not in a git repository</div>
+      <pre id="git-diff"></pre>
+      <input id="commit-msg" type="text" placeholder="commit message">
+      <button id="btn-commit">Commit file</button>
+      <h3>history</h3>
+      <div id="git-log"></div>
+    </aside>
+  </main>
+
+  <div id="home" hidden>
+    <h1>eddie</h1>
+    <p>Open a file from the terminal: <code>eddie notes.md</code></p>
+    <h2>Recent</h2>
+    <ul id="recent-list"></ul>
+    <h2>Browse</h2>
+    <div id="browser-path"></div>
+    <ul id="browser-list"></ul>
+  </div>
+
+  <footer id="statusbar">
+    <span id="status-msg">ready</span>
+    <span class="spacer"></span>
+    <span id="status-lang"></span>
+    <span id="status-pos"></span>
+  </footer>
+
+  <script src="/dist/app.js"></script>
+</body>
+</html>
