@@ -125,6 +125,12 @@ walking its cause chain. It's the substrate for the AI integration roadmap
 (`docs/design/ai-integration.md`), and it's local, in
 `~/.eddie/trace/*.jsonl`.
 
+The trace captures **your why** too: `/note reworded the intro for clarity`
+attaches a note to your last save (the 💬 button on any History row does the
+same for older entries), and commits made outside Eddie are imported with
+their messages — so "what changed and why" is answerable even for files that
+aren't in git.
+
 **Recommendations** ride on it: rule producers (e.g. unpushed commits, a
 lint pile-up) surface cards anchored to the relevant UI — a badge appears on
 the feature, the **✦** icon in the status bar shows the count (click it for

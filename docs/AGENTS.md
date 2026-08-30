@@ -91,6 +91,18 @@ prompted it.
 User feedback (👍/👎) arrives as `outcome` records whose `cause` points at
 your recommendation — read them to learn what was welcome.
 
+Notes and commit messages carry the human "why":
+
+- `PUT /api/file` returns `record`/`thread` for the save's trace record;
+  a note is a `message` record `{subtype: "note", text}` with `cause`
+  pointing at what it explains (the `/note` command and the History 💬
+  button do this).
+- `GET /api/trace/chain` also returns `effects` — forward links: notes,
+  decisions, and outcomes that point at the record.
+- Commits made outside eddie are imported as `git.commit.seen` events
+  (subject/author/hash) whenever eddie next looks at the repo — read
+  commit subjects as intent statements.
+
 ### AI chat
 
 - `POST /api/ai/chat` with `{"messages": [{"role": "user"|"assistant", "text": "…"}],

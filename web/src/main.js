@@ -199,6 +199,7 @@ async function save() {
   }
   try {
     const r = await api("PUT", "/api/file", { path: state.path, content: text });
+    if (r.record) state.lastSave = { id: r.record, thread: r.thread, path: state.path };
     setDirty(false);
     setStatus(`saved ${r.bytes} bytes`);
     refreshGitInfo();
@@ -471,6 +472,23 @@ registerCommand("hr", {
 registerCommand("lint", {
   title: "Toggle the lint panel",
   run: () => toggleLintPanel(),
+});
+
+registerCommand("note", {
+  title: "Attach a why-note to your last save",
+  hint: "/note reworded intro for clarity",
+  run: async (args) => {
+    if (!args) return setStatus("usage: /note <why you made the change>");
+    const target = state.lastSave && state.lastSave.path === state.path ? state.lastSave : null;
+    await api("POST", "/api/trace", {
+      kind: "message",
+      cause: target ? [target.id] : [],
+      thread: target ? target.thread : undefined,
+      context: state.path ? { doc: { path: state.path } } : {},
+      body: { subtype: "note", text: args },
+    });
+    setStatus(target ? "note attached to your last save" : "note recorded");
+  },
 });
 
 registerCommand("settings", {
@@ -903,6 +921,9 @@ registerPanel("history", {
 });
 
 function recordSummary(r) {
+  if (r.body.subtype === "note") return `🗒 ${r.body.text.slice(0, 70)}`;
+  if (r.body.name === "git.commit.seen") return `commit: "${r.body.subject}" — ${r.body.author}`;
+  if (r.body.name === "git.committed") return `commit: "${r.body.message}"`;
   return (
     r.body.name ||
     (r.body.text && r.body.text.slice(0, 70)) ||
@@ -930,7 +951,23 @@ async function renderHistory() {
     const meta = document.createElement("div");
     meta.className = "meta";
     meta.textContent = `${new Date(r.ts).toLocaleTimeString()} · ${r.actor.kind}:${r.actor.id}`;
-    row.append(kind, summary, meta);
+    const note = document.createElement("button");
+    note.className = "fb note-btn";
+    note.textContent = "💬";
+    note.title = "attach a note (the why)";
+    note.onclick = async (e) => {
+      e.stopPropagation();
+      const text = prompt("Note — why?");
+      if (!text) return;
+      await api("POST", "/api/trace", {
+        kind: "message",
+        cause: [r.id],
+        thread: r.thread,
+        body: { subtype: "note", text },
+      });
+      renderHistory();
+    };
+    row.append(kind, summary, note, meta);
     row.onclick = () => showChain(r.id, list, renderHistory);
     list.appendChild(row);
   }
@@ -938,12 +975,31 @@ async function renderHistory() {
 
 // Render a cause chain ("why?") into a container, with a back link.
 async function showChain(id, container, back) {
-  const { chain } = await api("GET", `/api/trace/chain?id=${encodeURIComponent(id)}`);
+  const { chain, effects } = await api("GET", `/api/trace/chain?id=${encodeURIComponent(id)}`);
   container.innerHTML = "";
   const backBtn = document.createElement("button");
   backBtn.textContent = "← back";
   backBtn.onclick = back;
   container.appendChild(backBtn);
+  if (effects && effects.length) {
+    const h = document.createElement("div");
+    h.className = "chain-arrow";
+    h.textContent = "▼ led to / annotated by";
+    const div = document.createElement("div");
+    div.className = "chain-layer";
+    for (const r of effects) {
+      const row = document.createElement("div");
+      row.className = "hist-row";
+      const kind = document.createElement("span");
+      kind.className = "kind";
+      kind.textContent = r.kind;
+      const summary = document.createElement("span");
+      summary.textContent = recordSummary(r);
+      row.append(kind, summary);
+      div.appendChild(row);
+    }
+    container.append(h, div);
+  }
   chain.forEach((layer, i) => {
     if (i > 0) {
       const arrow = document.createElement("div");

@@ -227,6 +227,63 @@ trace.subscribe((rec) => {
   }
 });
 
+// ---------- git commit importer ----------
+// Commit messages are the richest "why" text we get for free. Whenever
+// eddie looks at a repo, pull commits it hasn't seen into the trace as
+// git.commit.seen events. Baseline on first sight (no history flood);
+// commits made through eddie are deduped by remembering their hash.
+
+const GIT_IMPORT_STATE = path.join(EDDIE_HOME, "git-import.json");
+let gitImportState = null;
+
+async function loadGitImportState() {
+  if (gitImportState) return gitImportState;
+  try {
+    gitImportState = JSON.parse(await fsp.readFile(GIT_IMPORT_STATE, "utf8"));
+  } catch {
+    gitImportState = {};
+  }
+  return gitImportState;
+}
+
+async function saveGitImportState() {
+  await fsp.mkdir(EDDIE_HOME, { recursive: true });
+  await fsp.writeFile(GIT_IMPORT_STATE, JSON.stringify(gitImportState, null, 2)).catch(() => {});
+}
+
+function rememberImportedCommit(root, hash) {
+  loadGitImportState().then((state) => {
+    state[root] = hash;
+    saveGitImportState();
+  });
+}
+
+async function importNewCommits(root) {
+  const state = await loadGitImportState();
+  const head = await git(["rev-parse", "HEAD"], root);
+  if (!head.ok) return;
+  const headHash = head.stdout.trim();
+  const last = state[root];
+  if (last === headHash) return;
+  state[root] = headHash;
+  await saveGitImportState();
+  if (!last) return; // first sight of this repo: baseline only, no flood
+  const log = await git(
+    ["log", "--pretty=format:%H%x1f%an%x1f%aI%x1f%s", "-n", "20", `${last}..HEAD`],
+    root
+  );
+  if (!log.ok) return;
+  for (const line of log.stdout.split("\n").filter(Boolean).reverse()) {
+    const [hash, author, when, subject] = line.split(String.fromCharCode(31));
+    trace.append({
+      kind: "event",
+      actor: { kind: "system", id: "git-import" },
+      context: { repo: root },
+      body: { name: "git.commit.seen", hash, author, when, subject, repo: root },
+    });
+  }
+}
+
 // ---------- recent files ----------
 
 async function loadRecent() {
@@ -299,14 +356,20 @@ const api = {
     await fsp.mkdir(path.dirname(file), { recursive: true });
     await fsp.writeFile(file, body.content, "utf8");
     await touchRecent(file);
-    trace.append({
+    const saveRec = trace.append({
       kind: "action",
       actor: body.actor || { kind: "human", id: "ui" },
       thread: body.thread,
       context: { doc: { path: file, hash: sha(body.content) } },
       body: { name: "file.saved", path: file, bytes: Buffer.byteLength(body.content, "utf8") },
     });
-    json(res, 200, { ok: true, path: file, bytes: Buffer.byteLength(body.content, "utf8") });
+    json(res, 200, {
+      ok: true,
+      path: file,
+      bytes: Buffer.byteLength(body.content, "utf8"),
+      record: saveRec.id,
+      thread: saveRec.thread,
+    });
   },
 
   "GET /api/list": async (req, res, url) => {
@@ -343,6 +406,7 @@ const api = {
     const userName = await git(["config", "user.name"], root);
     const userEmail = await git(["config", "user.email"], root);
     const remote = await git(["remote", "get-url", "--push", "origin"], root);
+    importNewCommits(root).catch(() => {});
     // Rule producer: remind about unpushed commits; resolves itself on push.
     if (ahead > 0) {
       upsertRecommendation({
@@ -478,12 +542,14 @@ const api = {
     if (!add.ok) return json(res, 500, { ok: false, error: add.stderr });
     const commit = await git(["commit", "-m", body.message, "--", file], root);
     if (!commit.ok) return json(res, 500, { ok: false, error: commit.stderr || commit.stdout });
+    const head = await git(["rev-parse", "HEAD"], root);
     trace.append({
       kind: "action",
       actor: { kind: "human", id: "ui" },
       context: { doc: { path: file } },
-      body: { name: "git.committed", message: body.message, repo: root },
+      body: { name: "git.committed", message: body.message, repo: root, hash: head.ok ? head.stdout.trim() : undefined },
     });
+    if (head.ok) rememberImportedCommit(root, head.stdout.trim());
     json(res, 200, { ok: true, output: commit.stdout.trim() });
   },
 
@@ -650,7 +716,11 @@ const api = {
   },
 
   "GET /api/trace/chain": async (req, res, url) => {
-    json(res, 200, { chain: trace.chain(url.searchParams.get("id")) });
+    const id = url.searchParams.get("id");
+    // effects: forward links — records (notes, decisions, outcomes) whose
+    // cause points at this one.
+    const effects = trace.query({ limit: 500 }).filter((r) => (r.cause || []).includes(id));
+    json(res, 200, { chain: trace.chain(id), effects });
   },
 
   "POST /api/trace": async (req, res) => {
