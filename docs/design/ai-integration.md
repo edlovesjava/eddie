@@ -14,7 +14,9 @@ up an automation — *"please warn me if someone pushes something to this
 branch"* is an example of what a **user** might add, not a feature we
 pre-build. So there must be background agents reacting to events. Threads
 must be auditable: when, who (agent/human), the context at the time with
-traceable history — what I thought, what I did, why I did it.
+traceable history — what I thought, what I did, why I did it. And critical:
+**learning** — we did x because of y and it resulted in z (good decision,
+bad decision); feedback and learning are supported from the first.
 
 ## The unifying insight
 
@@ -84,7 +86,12 @@ Every record answers when / who / in-what-context / caused-by-what / what:
   `system`, with the config hash recorded). "Why was this allowed?" always
   has a literal stored answer.
 - **run** — an agent execution: instruction, model/CLI used, context refs,
-  outcome, duration, cost (cost feeds future budgets).
+  result, duration, cost (cost feeds future budgets).
+- **outcome** — how a decision/action *turned out*: valence
+  (`good | bad | mixed`), source (`explicit | observed | retrospective`),
+  cause → the record it judges. See §9.
+- **lesson** — distilled guidance learned from judged episodes, cause → the
+  episodes supporting it. See §9.
 
 ### Causality is the product
 
@@ -262,22 +269,78 @@ auto-apply), `ai.ambient`, `automations.create`, `automations.run`, plus
 per-automation overrides and budgets. `never` stays server-enforced; `ask`
 now has teeth everywhere via the approval queue.
 
+## 9. Learning — closing x → y → z
+
+The trace records what (x) and why (y); learning requires the outcome (z),
+a judgment, and a loop that changes future behavior.
+
+### Capturing outcomes
+
+An **episode** is a query, not a record: the cause-chain subgraph from
+intent through run/proposal/decision to outcome. An episode with an outcome
+is a labeled example — "we did x because of y and it resulted in z."
+Outcomes arrive three ways:
+
+1. **Explicit** — one-click 👍/👎 on every eddie surface (recommendation
+   popover, applied proposal, automation firing) with an optional one-line
+   why. Feedback must cost one click or it won't happen. Ships with the
+   first recommendation card in Phase 1.
+2. **Observed** — the system detects consequences: applied-then-reverted
+   within a window (bad — detected against the pre-patch snapshot already
+   stored), dismissed unread (mildly bad), snoozed repeatedly (bad),
+   applied and the `resolveOn` event followed (good), an agent-built plugin
+   still enabled weeks later (good). Zero user effort.
+3. **Retrospective** — "that rename last week was a mistake" said in chat;
+   the AI's `record_outcome` tool attaches the judgment to the old episode.
+   Judgment need not be contemporaneous.
+
+### The learning loop — lessons, not weights
+
+We don't fine-tune; learning is **distilled, legible guidance**:
+
+- A **reflection agent** (periodic, or on demand via `/reflect`) reads
+  recently judged episodes and distills `lesson` records — e.g. "table
+  suggestions while editing ADRs get dismissed (3/3); stop offering them
+  there." A lesson's cause points at its supporting episodes, so *"why does
+  the system believe this?"* is walkable like everything else.
+- **Lessons land as proposals** — the human approves what the system
+  learns, can edit a lesson, and retires one by superseding it (append-only,
+  like ADRs).
+- **Injection is the actuator**: approved lessons compile into a scoped
+  guidance file (by producer, doc type, repo) included in relevant agent
+  runs' prompts — the CLAUDE.md pattern, but machine-accumulated and
+  human-gated. z changes future x through text the human can read.
+- **Mechanical learning needs no AI**: per-producer acceptance stats from
+  outcomes drive attention economics automatically — a producer at 80%
+  dismissals is throttled toward `passive`; a trusted one earns `notice`.
+  The eddie icon earns or loses the right to animate. The same stats can
+  later suggest policy changes ("20/20 pull confirmations approved — switch
+  to auto?"), delivered as a recommendation, itself subject to judgment.
+
+Capture starts in Phase 1 (outcome kind + 👍/👎 + dismissal tracking) even
+though distillation arrives later — by the time the reflection agent exists
+it has months of labeled episodes to learn from.
+
 ## Phasing (each phase ships something usable)
 
 1. **Trace log + SSE + recommend panel** — the log with envelope/kinds, the
    bus as its tail, SSE push, toasts, status-bar eddie icon, general + UI
    anchors, rule-based producers (unpushed reminder, lint summary), History
-   panel with "why?". No AI changes.
+   panel with "why?". Feedback capture from day one: the `outcome` kind,
+   👍/👎 on every card, dismissal/snooze tracking. No AI changes.
    1.5 — in-session doc anchors (CM RangeSet) + the gutter eddie icon +
    contextual popover.
 2. **Proposals + `/ai` inline** — anchored patches with diff preview under
-   `ask`; decision records; threads + Continue-in-chat.
+   `ask`; decision records; threads + Continue-in-chat; observed outcomes
+   begin (applied-then-reverted detection against stored snapshots).
 3. **Automations + background agents** — automation records, pollers
    emitting external events, one-shot agent runs, the
-   "warn me if someone pushes" sentence works end-to-end.
+   "warn me if someone pushes" sentence works end-to-end; per-producer
+   acceptance stats start driving attention throttling.
 4. **MCP gateway** — full tool access; chat panel and external sessions
    become operators; capability-builder flow; quote-based re-anchoring for
-   persistence.
+   persistence; the reflection agent + `/reflect` distilling lessons, and
+   lesson injection into agent runs.
 5. **Ambient intent** — budgeted, recommendations-only, off by default.
 
 ## ADR candidates (written as each phase lands)
@@ -288,6 +351,8 @@ now has teeth everywhere via the approval queue.
 - Automations as records, interpreted by agents at fire time
 - Eddie as MCP server (extends 0008)
 - Ambient observation budget (extends 0006)
+- Lessons: learning as human-gated distilled guidance, never silent
+  behavior change
 
 ## Deliberately deferred
 
