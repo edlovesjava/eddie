@@ -26,12 +26,16 @@ right-click → Open With → Eddie):
 bash scripts/install-finder-app.sh
 ```
 
-[package](package.json)
+## Upgrade
 
-| Col 1 | Col 2 | Col 3 |
-| --- | --- | --- |
-| D11 | D12 | D13 |
-| D21 | D22 | D23 |
+```bash
+eddie upgrade
+```
+
+That's `git pull` + `npm install` (which rebuilds the frontend) + a server
+restart, in one go. Reload any open editor tabs afterward. (Commands also work
+as flags — `eddie --upgrade` — and a file literally named `upgrade` still
+opens as a file.)
 
 ## Use
 
@@ -44,16 +48,7 @@ eddie restart             # restart the server (picks up new code)
 eddie stop                # stop the server
 ```
 
-## Upgrade
-
-```bash
-eddie upgrade
-```
-
-That's `git pull` + `npm install` (which rebuilds the frontend) + a server
-restart, in one go. Reload any open editor tabs afterward. (Commands also work
-as flags — `eddie --upgrade` — and a file literally named `upgrade` still
-opens as a file.)
+## Editor
 
 The server listens on `http://127.0.0.1:4517` (change with `EDDIE_PORT` or
 `--port`). Opening a file that doesn't exist yet works — it's created on save.
@@ -91,6 +86,19 @@ In the editor:
   filterable command palette that works the same way. `/link` opens a
   Finder-style file picker and inserts a relative markdown link to the chosen
   doc. Plugins add their own commands via `eddie.registerCommand`
+
+## Slash command examples
+
+### here is a link using `/link`
+
+[package](package.json)
+
+### here is a table example using `/table 2 3`
+
+| Col 1 | Col 2 | Col 3 |
+| --- | --- | --- |
+| D11 | D12 | D13 |
+| D21 | D22 | D23 |
 
 ## Configuration
 
@@ -153,7 +161,7 @@ integration (open-from-URL in the UI, gists) is on the roadmap.
 
 ## Layout
 
-```
+```text
 bin/eddie.js        CLI: health-check, start server, open browser
 server/server.js    localhost HTTP server + JSON API (no dependencies)
 web/                frontend: CodeMirror 6 app (esbuild-bundled)
