@@ -782,7 +782,7 @@ function renderRecsUI() {
 
 function renderBadges() {
   document.querySelectorAll(".rec-badge").forEach((b) => b.remove());
-  const counts = {};
+  const counts = Object.create(null);
   for (const r of liveRecs.values()) {
     const a = r.body.anchor;
     if (a && a.type === "ui") counts[a.target] = (counts[a.target] || 0) + 1;
@@ -938,7 +938,13 @@ async function renderHistory() {
   const list = $("hist-list");
   if (!list) return;
   const kinds = $("hist-filter").value;
-  const { records } = await api("GET", `/api/trace?limit=80${kinds ? `&kinds=${kinds}` : ""}`);
+  let records;
+  try {
+    ({ records } = await api("GET", `/api/trace?limit=80${kinds ? `&kinds=${kinds}` : ""}`));
+  } catch (e) {
+    list.innerHTML = `<em>could not load history: ${e.message}</em>`;
+    return;
+  }
   list.innerHTML = records.length ? "" : "<em>no records yet</em>";
   for (const r of records) {
     const row = document.createElement("div");
@@ -975,7 +981,13 @@ async function renderHistory() {
 
 // Render a cause chain ("why?") into a container, with a back link.
 async function showChain(id, container, back) {
-  const { chain, effects } = await api("GET", `/api/trace/chain?id=${encodeURIComponent(id)}`);
+  let chain, effects;
+  try {
+    ({ chain, effects } = await api("GET", `/api/trace/chain?id=${encodeURIComponent(id)}`));
+  } catch (e) {
+    setStatus(`could not load chain: ${e.message}`);
+    return;
+  }
   container.innerHTML = "";
   const backBtn = document.createElement("button");
   backBtn.textContent = "← back";
@@ -1293,7 +1305,10 @@ const eddie = {
     api("POST", "/api/recommend", { producer, anchor, severity, text, actions, resolveOn, actor: { kind: "rule", id: producer } }),
   resolveRecommendation: (producer, anchor) =>
     api("POST", "/api/recommend/settle", { producer, anchor, how: "resolved" }),
-  onRecord: (fn) => recordHandlers.add(fn),
+  onRecord: (fn) => {
+    recordHandlers.add(fn);
+    return () => recordHandlers.delete(fn);
+  },
   trace: (record) => api("POST", "/api/trace", record),
   relint,
   openLintConfig,

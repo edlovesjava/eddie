@@ -327,7 +327,13 @@ async function listPlugins() {
 
 const api = {
   "GET /api/health": async (req, res) => {
-    json(res, 200, { ok: true, app: "eddie", version: VERSION, pid: process.pid });
+    json(res, 200, {
+      ok: true,
+      app: "eddie",
+      version: VERSION,
+      pid: process.pid,
+      traceWriteError: trace.writeError(),
+    });
   },
 
   "GET /api/file": async (req, res, url) => {
@@ -717,6 +723,7 @@ const api = {
 
   "GET /api/trace/chain": async (req, res, url) => {
     const id = url.searchParams.get("id");
+    if (!id) return json(res, 400, { ok: false, error: "id required" });
     // effects: forward links — records (notes, decisions, outcomes) whose
     // cause points at this one.
     const effects = trace.query({ limit: 500 }).filter((r) => (r.cause || []).includes(id));

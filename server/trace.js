@@ -14,6 +14,7 @@ let records = [];
 const byId = new Map();
 const subscribers = new Set();
 let seq = 0;
+let lastWriteError = null;
 
 function segmentPath(date = new Date()) {
   return path.join(TRACE_DIR, `${date.toISOString().slice(0, 10)}.jsonl`);
@@ -66,7 +67,14 @@ function append(partial) {
     body: partial.body || {},
   };
   if (!rec.thread) rec.thread = `t_${rec.id.slice(2)}`;
-  fs.appendFile(segmentPath(), JSON.stringify(rec) + "\n", () => {});
+  fs.appendFile(segmentPath(), JSON.stringify(rec) + "\n", (err) => {
+    if (err && err.message !== lastWriteError) {
+      lastWriteError = err.message;
+      console.error(`trace write failed — history will not persist: ${err.message}`);
+    } else if (!err) {
+      lastWriteError = null;
+    }
+  });
   remember(rec);
   for (const fn of subscribers) {
     try {
@@ -120,4 +128,4 @@ function chain(id, maxDepth = 8) {
   return layers;
 }
 
-module.exports = { init, append, subscribe, get, query, chain, KINDS };
+module.exports = { init, append, subscribe, get, query, chain, KINDS, writeError: () => lastWriteError };

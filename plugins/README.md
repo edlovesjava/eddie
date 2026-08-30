@@ -29,7 +29,7 @@ Plugins use the global `window.eddie` object:
 | `eddie.markdown(text)` | render markdown to HTML (same renderer as the preview) |
 | `eddie.recommend({producer, text, anchor?, severity?, actions?, resolveOn?})` | surface a recommendation (see lint-advisor.js for a producer example) |
 | `eddie.resolveRecommendation(producer, anchor)` | resolve your own recommendation when its condition clears |
-| `eddie.onRecord(fn)` | subscribe to the live trace stream — `fn(record)` for every new record |
+| `eddie.onRecord(fn)` | subscribe to the live trace stream — `fn(record)` for every new record; returns an unsubscribe function |
 | `eddie.trace(record)` | append a record to the trace (`{kind, body, cause?, thread?}`) |
 | `eddie.relint()` | re-run all linters on the current document |
 | `eddie.openLintConfig()` | open the current language's linter config (what the Lint ⚙ button does) |

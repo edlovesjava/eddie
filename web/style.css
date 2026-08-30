@@ -205,7 +205,16 @@ button:hover { border-color: var(--accent); color: var(--accent); }
 #linkpick-path { padding: 4px 12px; color: var(--muted); font-family: ui-monospace, monospace; font-size: 11px; word-break: break-all; }
 #linkpick-list .dir { color: var(--accent); }
 /* eddie icon, toasts, recommendations, history */
-#eddie-icon { color: var(--muted); cursor: pointer; user-select: none; }
+#eddie-icon {
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+  /* it's a <button> for keyboard access; strip native chrome to keep the statusbar look */
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+}
 #eddie-icon.has-recs { color: var(--accent); }
 #eddie-icon.pulse { animation: eddie-pulse 0.9s ease-in-out 2; }
 @keyframes eddie-pulse {
