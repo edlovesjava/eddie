@@ -24,6 +24,9 @@ Plugins use the global `window.eddie` object:
 | `eddie.registerCommand(name, {title, hint, run})` | add a slash command (see below) |
 | `eddie.runCommand(name, args)` | invoke any command programmatically |
 | `eddie.pickFile(startDir?)` | show the file-picker dialog; resolves to a path or null |
+| `eddie.registerPanel(id, {title, button?, render, onShow?, onHide?})` | add a dock panel with its own toolbar button (see below) |
+| `eddie.togglePanel(id)` / `eddie.isPanelOpen(id)` | open/close or query a panel |
+| `eddie.markdown(text)` | render markdown to HTML (same renderer as the preview) |
 | `eddie.relint()` | re-run all linters on the current document |
 | `eddie.openLintConfig()` | open the current language's linter config (what the Lint ⚙ button does) |
 | `eddie.onSave(fn)` | run `fn(text, {path, language})` before every save; return a string to rewrite the content being saved |
@@ -32,6 +35,27 @@ Plugins use the global `window.eddie` object:
 | `eddie.api(method, url, body)` | call the Eddie server API (see docs/AGENTS.md) |
 
 Language ids: `markdown`, `json`, `shell`, `yaml`, `javascript`, `css`, `html`, `text`.
+
+## Panels
+
+Eddie composes features as panels: self-contained units that render into the
+right-side dock, get a toolbar button automatically, and show one at a time.
+The built-in **git panel uses this same API**, and the **AI chat panel is
+itself a plugin** ([chat.js](chat.js)) — read it as the reference example.
+
+```js
+eddie.registerPanel("outline", {
+  title: "Document outline",
+  button: "Outline",
+  render(el) {           // called once, lazily, on first open
+    el.innerHTML = "<h3>outline</h3><div id='outline-body'></div>";
+  },
+  onShow(el) {           // called every time the panel becomes visible
+    const heads = eddie.getText().match(/^#+ .+$/gm) || [];
+    el.querySelector("#outline-body").innerHTML = eddie.markdown(heads.join("\n\n"));
+  },
+});
+```
 
 ## Slash commands
 

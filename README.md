@@ -100,6 +100,21 @@ In the editor:
 | D11 | D12 | D13 |
 | D21 | D22 | D23 |
 
+## Panels
+
+Features compose as **panels** — self-contained units in the right-side dock,
+each with an auto-created toolbar button. The git panel is one; **AI chat**
+is another, and it's implemented entirely as a plugin (`plugins/chat.js`) to
+keep the architecture honest: if chat can be built without touching core,
+anything can. Register your own with `eddie.registerPanel` (see
+[plugins/README.md](plugins/README.md)).
+
+**AI chat** talks to your local `claude` CLI (Claude Code) — no API key to
+manage; it uses whatever auth your CLI already has. Open **Chat**, ask about
+the current document ("include document" sends the live buffer as context),
+Cmd+Enter to send. Swap the backend with `ai.command`/`ai.args` in
+`/settings`, or disable it entirely with `"ai": {"chat": "never"}`.
+
 ## Configuration
 
 Eddie has a behavior policy system: each action is `"auto"` (just do it),

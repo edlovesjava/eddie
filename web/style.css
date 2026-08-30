@@ -80,7 +80,7 @@ button:hover { border-color: var(--accent); color: var(--accent); }
 #preview th, #preview td { border: 1px solid var(--border); padding: 4px 10px; }
 #preview img { max-width: 100%; }
 
-#git-panel {
+#dock {
   width: 320px;
   flex: none;
   overflow: auto;
@@ -88,7 +88,31 @@ button:hover { border-color: var(--accent); color: var(--accent); }
   background: var(--panel);
   padding: 12px;
 }
-#git-panel h3 { margin: 4px 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+#dock .panel { display: none; }
+#dock .panel.active { display: block; }
+#dock h3 { margin: 4px 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+#panel-buttons { display: inline-flex; gap: 10px; }
+#panel-buttons button.active { border-color: var(--accent); color: var(--accent); }
+
+/* chat panel (plugins/chat.js) */
+.chat-log { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+.chat-msg { padding: 6px 10px; border-radius: 8px; font-size: 13px; overflow-wrap: break-word; }
+.chat-msg.user { background: var(--border); align-self: flex-end; max-width: 90%; }
+.chat-msg.assistant { background: var(--bg); border: 1px solid var(--border); }
+.chat-msg.assistant pre { overflow-x: auto; background: var(--panel); padding: 6px; border-radius: 6px; }
+.chat-msg.pending { color: var(--muted); font-style: italic; }
+#chat-input {
+  width: 100%;
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  resize: vertical;
+}
+.chat-actions { display: flex; align-items: center; justify-content: space-between; margin-top: 6px; font-size: 12px; color: var(--muted); }
 #git-diff {
   font-size: 11px;
   white-space: pre-wrap;

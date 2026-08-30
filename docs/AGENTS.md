@@ -66,6 +66,13 @@ All paths are absolute (a leading `~` is expanded). Responses are JSON.
 - `GET /api/fetch?url=https://…` → `{ok, status, content}` — read-only fetch,
   e.g. a raw GitHub URL. Save the content locally with `PUT /api/file`.
 
+### AI chat
+
+- `POST /api/ai/chat` with `{"messages": [{"role": "user"|"assistant", "text": "…"}],
+  "path": "…", "context": {"path", "language", "text"}?}` → `{ok, reply}`.
+  The server pipes a composed prompt to the configured CLI (`ai.command`,
+  default `claude -p`). Governed by `ai.chat` policy (`never` → 403).
+
 ### Plugins
 
 - `GET /api/plugins` → `{plugins: [{name, origin, url}], userPluginDir}`

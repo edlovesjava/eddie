@@ -638,6 +638,60 @@ registerLinter("json", "json-parse", (text, { view }) =>
   text.trim() ? jsonParseLinter()(view).map((d) => ({ ...d, severity: "error" })) : []
 );
 
+// ---------- panels ----------
+//
+// Eddie composes features as panels: self-contained units that render into
+// the right-side dock and get a toolbar button for free. The git panel is
+// built on this, and plugins register their own (e.g. plugins/chat.js) with
+// eddie.registerPanel(id, {title, button?, render(el), onShow?, onHide?}).
+
+const panels = new Map();
+let activePanel = null;
+
+function registerPanel(id, spec) {
+  panels.set(id, spec);
+  const btn = document.createElement("button");
+  btn.id = `panel-btn-${id}`;
+  btn.textContent = spec.button || spec.title;
+  btn.title = spec.title;
+  btn.onclick = () => togglePanel(id);
+  $("panel-buttons").appendChild(btn);
+}
+
+function isPanelOpen(id) {
+  return activePanel === id;
+}
+
+function hidePanel() {
+  if (!activePanel) return;
+  panels.get(activePanel).onHide?.();
+  activePanel = null;
+  $("dock").hidden = true;
+  document.querySelectorAll("#panel-buttons button").forEach((b) => b.classList.remove("active"));
+}
+
+function togglePanel(id) {
+  if (activePanel === id) return hidePanel();
+  const spec = panels.get(id);
+  if (!spec) return;
+  if (activePanel) panels.get(activePanel).onHide?.();
+  let el = document.getElementById(`panel-${id}`);
+  if (!el) {
+    el = document.createElement("div");
+    el.id = `panel-${id}`;
+    el.className = "panel";
+    $("dock").appendChild(el);
+    spec.render(el);
+  }
+  for (const p of $("dock").children) p.classList.toggle("active", p === el);
+  $("dock").hidden = false;
+  activePanel = id;
+  document
+    .querySelectorAll("#panel-buttons button")
+    .forEach((b) => b.classList.toggle("active", b.id === `panel-btn-${id}`));
+  spec.onShow?.(el);
+}
+
 // ---------- git ----------
 
 async function refreshGitInfo() {
@@ -656,11 +710,35 @@ async function refreshGitInfo() {
       `${info.branch}${info.fileStatus === "clean" ? "" : " *"}` +
       (info.ahead ? ` ↑${info.ahead}` : "") +
       (info.behind ? ` ↓${info.behind}` : "");
-    if (!$("git-panel").hidden) refreshGitPanel();
+    if (isPanelOpen("git")) refreshGitPanel();
   } catch {
     /* non-fatal */
   }
 }
+
+registerPanel("git", {
+  title: "Git panel",
+  button: "Git",
+  render(el) {
+    el.innerHTML = `
+      <h3>git</h3>
+      <div id="git-detail">not in a git repository</div>
+      <pre id="git-diff"></pre>
+      <input id="commit-msg" type="text" placeholder="commit message">
+      <div class="git-actions">
+        <button id="btn-commit">Commit file</button>
+        <button id="btn-pull">Pull</button>
+        <button id="btn-push">Push</button>
+      </div>
+      <div id="git-sync"></div>
+      <h3>history</h3>
+      <div id="git-log"></div>`;
+    el.querySelector("#btn-commit").onclick = commitFile;
+    el.querySelector("#btn-push").onclick = pushChanges;
+    el.querySelector("#btn-pull").onclick = pullChanges;
+  },
+  onShow: () => refreshGitPanel(),
+});
 
 async function refreshGitPanel() {
   if (!state.gitRoot) {
@@ -867,6 +945,10 @@ const eddie = {
   registerCommand,
   runCommand,
   pickFile,
+  registerPanel,
+  togglePanel,
+  isPanelOpen,
+  markdown: (text) => marked.parse(text),
   relint,
   openLintConfig,
   onSave: (fn) => state.saveHooks.push(fn),
@@ -928,14 +1010,6 @@ document.addEventListener("keydown", (e) => {
     else if (!$("palette").hidden) closePalette();
   }
 });
-$("btn-git").onclick = () => {
-  const p = $("git-panel");
-  p.hidden = !p.hidden;
-  if (!p.hidden) refreshGitPanel();
-};
-$("btn-commit").onclick = commitFile;
-$("btn-push").onclick = pushChanges;
-$("btn-pull").onclick = pullChanges;
 
 window.addEventListener("beforeunload", (e) => {
   if (state.dirty) e.preventDefault();

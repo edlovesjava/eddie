@@ -20,27 +20,14 @@
     <button id="btn-lint-config" title="Edit the linter config for this language">Lint ⚙</button>
     <button id="btn-format" title="Format document">Format</button>
     <button id="btn-preview" title="Toggle preview (Cmd+Shift+P)">Preview</button>
-    <button id="btn-git" title="Git panel">Git</button>
+    <span id="panel-buttons"></span>
     <button id="btn-save" title="Save (Cmd+S)">Save</button>
   </header>
 
   <main id="main">
     <div id="editor"></div>
     <div id="preview" hidden></div>
-    <aside id="git-panel" hidden>
-      <h3>git</h3>
-      <div id="git-detail">not in a git repository</div>
-      <pre id="git-diff"></pre>
-      <input id="commit-msg" type="text" placeholder="commit message">
-      <div class="git-actions">
-        <button id="btn-commit">Commit file</button>
-        <button id="btn-pull">Pull</button>
-        <button id="btn-push">Push</button>
-      </div>
-      <div id="git-sync"></div>
-      <h3>history</h3>
-      <div id="git-log"></div>
-    </aside>
+    <aside id="dock" hidden></aside>
   </main>
 
   <div id="palette" hidden>

@@ -8,7 +8,7 @@ const fs = require("fs");
 const fsp = require("fs/promises");
 const path = require("path");
 const os = require("os");
-const { execFile } = require("child_process");
+const { execFile, spawn } = require("child_process");
 
 const PORT = parseInt(process.env.EDDIE_PORT || "4517", 10);
 const HOST = "127.0.0.1";
@@ -105,6 +105,11 @@ const CONFIG_DEFAULTS = {
     pull: "ask",
     autofetch: "auto",
     pullStrategy: "rebase", // rebase | merge | ff-only
+  },
+  ai: {
+    chat: "auto", // auto | never
+    command: "claude", // CLI that answers chat prompts (prompt on stdin)
+    args: ["-p"],
   },
 };
 
@@ -446,6 +451,60 @@ const api = {
       }
     }
     json(res, 200, { configPath: null, content: null, source: "none" });
+  },
+
+  "POST /api/ai/chat": async (req, res) => {
+    const body = JSON.parse((await readBody(req)).toString("utf8"));
+    const ctxPath = body.path ? resolvePath(body.path) : null;
+    const { config } = await loadEddieConfig(ctxPath);
+    const ai = { ...CONFIG_DEFAULTS.ai, ...(config.ai || {}) };
+    if (ai.chat === "never") {
+      return json(res, 403, { ok: false, error: "AI chat is disabled by eddie config (ai.chat: never)" });
+    }
+    const parts = [
+      "You are the AI assistant panel inside eddie, the user's personal text editor.",
+      "Answer the user's latest message. Be concise. Reply in plain markdown.",
+    ];
+    if (body.context && body.context.text != null) {
+      parts.push(
+        `\nThe user has this file open: ${body.context.path || "(unsaved)"} (${body.context.language || "text"})`,
+        "<<<DOCUMENT", body.context.text, "DOCUMENT>>>"
+      );
+    }
+    parts.push("\nConversation so far:");
+    for (const m of body.messages || []) {
+      parts.push(`${m.role === "user" ? "User" : "Assistant"}: ${m.text}`);
+    }
+    const prompt = parts.join("\n");
+    const child = spawn(ai.command, ai.args, { stdio: ["pipe", "pipe", "pipe"] });
+    let out = "";
+    let errOut = "";
+    let done = false;
+    const finish = (status, obj) => {
+      if (!done) {
+        done = true;
+        json(res, status, obj);
+      }
+    };
+    const timer = setTimeout(() => {
+      child.kill();
+      finish(504, { ok: false, error: `${ai.command} timed out after 180s` });
+    }, 180000);
+    child.stdout.on("data", (c) => (out += c));
+    child.stderr.on("data", (c) => (errOut += c));
+    child.on("error", (e) => {
+      clearTimeout(timer);
+      finish(500, {
+        ok: false,
+        error: `could not run '${ai.command}': ${e.message} — install it or set ai.command in eddie config`,
+      });
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (code === 0) finish(200, { ok: true, reply: out.trim() });
+      else finish(500, { ok: false, error: (errOut || out || `${ai.command} exited with ${code}`).trim().slice(0, 2000) });
+    });
+    child.stdin.end(prompt);
   },
 
   "GET /api/plugins": async (req, res) => {
