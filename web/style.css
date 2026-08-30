@@ -204,6 +204,65 @@ button:hover { border-color: var(--accent); color: var(--accent); }
 .pick-head button { border: none; background: none; font-size: 14px; }
 #linkpick-path { padding: 4px 12px; color: var(--muted); font-family: ui-monospace, monospace; font-size: 11px; word-break: break-all; }
 #linkpick-list .dir { color: var(--accent); }
+/* eddie icon, toasts, recommendations, history */
+#eddie-icon {
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+  /* it's a <button> for keyboard access; strip native chrome to keep the statusbar look */
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+}
+#eddie-icon.has-recs { color: var(--accent); }
+#eddie-icon.pulse { animation: eddie-pulse 0.9s ease-in-out 2; }
+@keyframes eddie-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.5); }
+}
+#toasts { position: fixed; right: 16px; bottom: 42px; display: flex; flex-direction: column; gap: 8px; z-index: 200; }
+.toast {
+  background: var(--panel);
+  border: 1px solid #b45309;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .2);
+  max-width: 340px;
+}
+.has-badge { position: relative; }
+.rec-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  line-height: 1;
+  border-radius: 8px;
+  padding: 2px 5px;
+  pointer-events: none;
+}
+.rec-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+.rec-card.notice { border-left: 3px solid var(--accent); }
+.rec-card.warn { border-left: 3px solid var(--danger); }
+.rec-card .prov { color: var(--muted); font-size: 11px; margin-top: 2px; }
+.rec-card .rec-actions { display: flex; gap: 6px; margin-top: 6px; align-items: center; flex-wrap: wrap; }
+.rec-card .rec-actions .fb { border: none; background: none; padding: 2px; font-size: 14px; }
+.rec-card .rec-actions .why { margin-left: auto; font-size: 11px; color: var(--muted); background: none; border: none; }
+.hist-row { padding: 4px 0; border-bottom: 1px solid var(--border); font-size: 12px; cursor: pointer; }
+.hist-row .meta { color: var(--muted); font-size: 11px; }
+.hist-row .kind { display: inline-block; min-width: 60px; color: var(--accent); font-family: ui-monospace, monospace; font-size: 11px; }
+.chain-layer { margin-bottom: 4px; }
+.chain-arrow { color: var(--muted); text-align: center; font-size: 11px; }
 #status-lint { color: #b45309; cursor: pointer; }
 #status-lint:empty { display: none; }
 @media (prefers-color-scheme: dark) { #status-lint { color: #fbbf24; } }

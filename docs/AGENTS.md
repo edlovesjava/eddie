@@ -66,6 +66,43 @@ All paths are absolute (a leading `~` is expanded). Responses are JSON.
 - `GET /api/fetch?url=https://…` → `{ok, status, content}` — read-only fetch,
   e.g. a raw GitHub URL. Save the content locally with `PUT /api/file`.
 
+### Trace log & recommendations (ADR-0010)
+
+Eddie records everything notable in an append-only trace
+(`~/.eddie/trace/*.jsonl`): records with `{id, ts, actor, thread, cause,
+context, kind, body}` where kind is `event | message | action | proposal |
+decision | run | outcome | lesson`. As an agent, **write to the trace** so
+your work is auditable — every record's `cause` should point at what
+prompted it.
+
+- `GET /api/events` → Server-Sent Events stream of new records (the live tail)
+- `GET /api/trace?kinds=action,message&thread=…&limit=100` → recent records
+- `GET /api/trace/chain?id=…` → the "why?" cause chain for a record
+- `POST /api/trace` with `{kind, actor?, thread?, cause?, context?, body}` →
+  append a record (use `actor: {kind: "agent", id: "<your name>"}`)
+- `GET /api/recommendations` → live (unsettled) recommendations
+- `POST /api/recommend` with `{producer, text, anchor?, severity?, actions?,
+  resolveOn?}` → surface a recommendation to the user. Anchors:
+  `{type: "general"}`, `{type: "ui", target: "panel:git|element:<id>"}`.
+  `severity`: `passive | notice | warn`. `resolveOn` names an event
+  (e.g. `git.pushed`) that auto-resolves it. Coalesced by producer+anchor.
+- `POST /api/recommend/settle` with `{id, how: applied|dismissed|resolved}`
+
+User feedback (👍/👎) arrives as `outcome` records whose `cause` points at
+your recommendation — read them to learn what was welcome.
+
+Notes and commit messages carry the human "why":
+
+- `PUT /api/file` returns `record`/`thread` for the save's trace record;
+  a note is a `message` record `{subtype: "note", text}` with `cause`
+  pointing at what it explains (the `/note` command and the History 💬
+  button do this).
+- `GET /api/trace/chain` also returns `effects` — forward links: notes,
+  decisions, and outcomes that point at the record.
+- Commits made outside eddie are imported as `git.commit.seen` events
+  (subject/author/hash) whenever eddie next looks at the repo — read
+  commit subjects as intent statements.
+
 ### AI chat
 
 - `POST /api/ai/chat` with `{"messages": [{"role": "user"|"assistant", "text": "…"}],
