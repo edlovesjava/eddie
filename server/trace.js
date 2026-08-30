@@ -49,8 +49,11 @@ function remember(rec) {
   }
 }
 
+// Per-process nonce keeps ids unique across restarts even under clock skew.
+const NONCE = Math.random().toString(36).slice(2, 6);
+
 function newId() {
-  return `r_${Date.now().toString(36)}${(++seq).toString(36).padStart(3, "0")}`;
+  return `r_${Date.now().toString(36)}${NONCE}${(++seq).toString(36).padStart(3, "0")}`;
 }
 
 // Append a record. Fills in id/ts/defaults; returns the full record.
@@ -67,14 +70,18 @@ function append(partial) {
     body: partial.body || {},
   };
   if (!rec.thread) rec.thread = `t_${rec.id.slice(2)}`;
-  fs.appendFile(segmentPath(), JSON.stringify(rec) + "\n", (err) => {
-    if (err && err.message !== lastWriteError) {
+  // Synchronous append: this is the auditable substrate, so a record is on
+  // disk, in order, before anyone hears about it. Lines are tiny and the
+  // write rate is personal-scale, so blocking here is negligible.
+  try {
+    fs.appendFileSync(segmentPath(), JSON.stringify(rec) + "\n");
+    lastWriteError = null;
+  } catch (err) {
+    if (err.message !== lastWriteError) {
       lastWriteError = err.message;
       console.error(`trace write failed — history will not persist: ${err.message}`);
-    } else if (!err) {
-      lastWriteError = null;
     }
-  });
+  }
   remember(rec);
   for (const fn of subscribers) {
     try {

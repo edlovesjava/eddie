@@ -716,7 +716,9 @@ const api = {
         kinds: p.get("kinds") ? p.get("kinds").split(",") : undefined,
         thread: p.get("thread") || undefined,
         actorKind: p.get("actor") || undefined,
-        limit: Math.min(parseInt(p.get("limit") || "100", 10), 500),
+        limit: Number.isFinite(parseInt(p.get("limit"), 10))
+          ? Math.min(parseInt(p.get("limit"), 10), 500)
+          : 100,
       }),
     });
   },
