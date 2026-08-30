@@ -124,6 +124,18 @@ Gotchas: `includeIf "gitdir:~/code/personal/"` needs the trailing slash, and
 it matches the repo's real path — a repo reached through a symlink won't
 match.
 
+Two ssh_config traps (both found the hard way):
+
+- **`IdentityFile` under `Host *` leaks into every alias.** Unlike most ssh
+  options (first match wins), `IdentityFile` *accumulates* across all
+  matching blocks — a global work key gets offered first and GitHub happily
+  authenticates you as the wrong account, even with `IdentitiesOnly yes`.
+  Keep each `IdentityFile` inside a specific `Host` block, never `Host *`.
+- **SSH over port 443.** If your `Host github.com` block uses
+  `Hostname ssh.github.com` / `Port 443` (common where a network blocks
+  port 22), give the aliases the same `Hostname`/`Port` — otherwise they
+  hang on that network while the work block sails through.
+
 ## Why your push was denied
 
 macOS Keychain (the default HTTPS credential helper) stores **one** GitHub
