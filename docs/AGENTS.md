@@ -37,6 +37,9 @@ All paths are absolute (a leading `~` is expanded). Responses are JSON.
 - `POST /api/git/commit` with `{"path": "…", "message": "…"}` → stages and commits that one file
 - `POST /api/git/push` with `{"path": "…"}` → `git push` from that file's repo
   (adds `--set-upstream origin <branch>` when the branch has no upstream)
+- `POST /api/git/fetch` with `{"path": "…"}` → `git fetch` (refreshes ahead/behind)
+- `POST /api/git/pull` with `{"path": "…"}` → `git pull --rebase --autostash`;
+  on conflict the rebase is aborted (repo left clean) and an error is returned
 
 ### Linting
 

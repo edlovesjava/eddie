@@ -74,9 +74,12 @@ In the editor:
   (so per-project configs just work), else `~/.eddie/markdownlint.json`, which
   Eddie creates with sensible defaults on first use. Edit, save, refocus your
   document's tab — the new rules apply immediately.
-- **Git** opens a panel with the file's diff, one-box commit, history, and
-  **Push**. Commits that haven't reached the upstream are tagged `unpushed`,
-  the panel says how many commits you're ahead/behind, and the top-bar badge
+- **Git** opens a panel with the file's diff, one-box commit, history,
+  **Push**, and **Pull**. Opening the panel fetches, so the ahead/behind
+  counts reflect the real remote; Pull is `git pull --rebase --autostash`
+  (conflicts abort cleanly with a message), and if the open file isn't dirty
+  it reloads after a pull. Commits that haven't reached the upstream are
+  tagged `unpushed`, and the top-bar badge
   shows the branch plus `↑n` when there's something to push (`git push` runs
   with your normal local credentials; a branch with no upstream gets
   `--set-upstream origin <branch>` automatically). The panel shows which

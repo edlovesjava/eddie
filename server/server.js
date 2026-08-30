@@ -251,6 +251,34 @@ const api = {
     json(res, 200, { root, log, hasUpstream: up.ok });
   },
 
+  "POST /api/git/fetch": async (req, res) => {
+    const body = JSON.parse((await readBody(req)).toString("utf8"));
+    const root = await gitRoot(resolvePath(body.path));
+    if (!root) return json(res, 400, { ok: false, error: "not in a git repository" });
+    const r = await git(["fetch", "--quiet"], root);
+    json(res, 200, { ok: r.ok, error: r.ok ? undefined : r.stderr.trim() });
+  },
+
+  "POST /api/git/pull": async (req, res) => {
+    const body = JSON.parse((await readBody(req)).toString("utf8"));
+    const root = await gitRoot(resolvePath(body.path));
+    if (!root) return json(res, 400, { ok: false, error: "not in a git repository" });
+    // Rebase keeps personal history linear; autostash tolerates unsaved
+    // working-tree changes. On conflict, abort so the repo is left clean.
+    const pull = await git(["pull", "--rebase", "--autostash"], root);
+    if (!pull.ok) {
+      const conflicted = /CONFLICT|could not apply|needs merge/i.test(pull.stderr + pull.stdout);
+      if (conflicted) await git(["rebase", "--abort"], root);
+      return json(res, 500, {
+        ok: false,
+        error: conflicted
+          ? "local and remote changes conflict — resolve with git in a terminal"
+          : (pull.stderr || pull.stdout).trim(),
+      });
+    }
+    json(res, 200, { ok: true, output: (pull.stdout || pull.stderr).trim() });
+  },
+
   "POST /api/git/push": async (req, res) => {
     const body = JSON.parse((await readBody(req)).toString("utf8"));
     const file = resolvePath(body.path);

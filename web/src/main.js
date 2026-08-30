@@ -635,6 +635,9 @@ async function refreshGitPanel() {
     $("git-log").innerHTML = "";
     return;
   }
+  // Fetch first so ahead/behind reflects the actual remote, not a stale ref.
+  // Best-effort: offline just means counts stay as-is.
+  await api("POST", "/api/git/fetch", { path: state.path }).catch(() => {});
   const [info, diff, log] = await Promise.all([
     api("GET", `/api/git/info?path=${encodeURIComponent(state.path)}`),
     api("GET", `/api/git/diff?path=${encodeURIComponent(state.path)}`),
@@ -658,6 +661,7 @@ async function refreshGitPanel() {
         `${info.behind ? `${info.behind} behind upstream` : ""}`
       : "in sync with upstream";
   $("btn-push").textContent = info.ahead ? `Push ↑${info.ahead}` : "Push";
+  $("btn-pull").textContent = info.behind ? `Pull ↓${info.behind}` : "Pull";
   $("git-log").innerHTML = "";
   for (const e of log.log) {
     const div = document.createElement("div");
@@ -690,7 +694,32 @@ async function pushChanges() {
     const r = await api("POST", "/api/git/push", { path: state.path });
     setStatus(r.output.split("\n").pop() || "pushed");
   } catch (e) {
-    setStatus(`push failed: ${e.message}`, true);
+    if (/fetch first|rejected|non-fast-forward/i.test(e.message)) {
+      setStatus("push rejected — the remote has new commits. Pull, then Push again.", true);
+    } else {
+      setStatus(`push failed: ${e.message}`, true);
+    }
+  } finally {
+    btn.disabled = false;
+    refreshGitInfo();
+    refreshGitPanel();
+  }
+}
+
+async function pullChanges() {
+  const btn = $("btn-pull");
+  btn.disabled = true;
+  btn.textContent = "Pulling…";
+  try {
+    const r = await api("POST", "/api/git/pull", { path: state.path });
+    setStatus(r.output.split("\n").pop() || "pulled");
+    if (!state.dirty) {
+      await openFile(state.path); // reload — the file may have changed on disk
+    } else {
+      setStatus("pulled — unsaved edits kept; saving will overwrite any pulled changes to this file", true);
+    }
+  } catch (e) {
+    setStatus(`pull failed: ${e.message}`, true);
   } finally {
     btn.disabled = false;
     refreshGitInfo();
@@ -847,6 +876,7 @@ $("btn-git").onclick = () => {
 };
 $("btn-commit").onclick = commitFile;
 $("btn-push").onclick = pushChanges;
+$("btn-pull").onclick = pullChanges;
 
 window.addEventListener("beforeunload", (e) => {
   if (state.dirty) e.preventDefault();
