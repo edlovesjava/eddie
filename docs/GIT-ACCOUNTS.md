@@ -99,6 +99,31 @@ git config user.email          # work email?
 ssh -T git@github-work         # "Hi <work-account>!"
 ```
 
+## Adapting an existing `gh`-based config
+
+If your `~/.gitconfig` already routes github.com credentials through the
+GitHub CLI —
+
+```ini
+[credential "https://github.com"]
+    helper = 
+    helper = !/usr/local/bin/gh auth git-credential
+```
+
+— then HTTPS pushes authenticate as whichever account is *active* in `gh`
+(one at a time for all of github.com; the blank `helper =` line is
+intentional — it stops osxkeychain from also answering). You don't have to
+rip that out: leave `gh` as the auth for your default/most-used account, and
+carve out the other accounts by folder with `includeIf` + SSH aliases as
+above. Repos in the carved-out folders push over SSH with the right key
+(the `insteadOf` rewrite catches their HTTPS remotes automatically); every
+other repo keeps using `gh` exactly as before. Only the non-default accounts
+need SSH keys.
+
+Gotchas: `includeIf "gitdir:~/code/personal/"` needs the trailing slash, and
+it matches the repo's real path — a repo reached through a symlink won't
+match.
+
 ## Why your push was denied
 
 macOS Keychain (the default HTTPS credential helper) stores **one** GitHub
