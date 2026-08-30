@@ -31,7 +31,22 @@ const state = {
   saveHooks: [],
   linters: {}, // language -> [{name, fn, configNames, fallback, defaultConfig}]
   lintPanelOpen: false,
+  config: null, // effective eddie config for the open file
+  gitInfo: null, // last /api/git/info result
 };
+
+function policy(action) {
+  return state.config?.git?.[action] || { pull: "ask", pullStrategy: "rebase" }[action] || "auto";
+}
+
+async function loadConfig() {
+  try {
+    const q = state.path ? `?path=${encodeURIComponent(state.path)}` : "";
+    state.config = (await api("GET", `/api/config${q}`)).config;
+  } catch {
+    state.config = null;
+  }
+}
 
 const langCompartment = new Compartment();
 const themeCompartment = new Compartment();
@@ -160,6 +175,7 @@ async function openFile(path) {
   createView(data.content);
   setDirty(false);
   if (!data.exists) setStatus("new file — will be created on save");
+  loadConfig();
   refreshGitInfo();
   if (data.language === "markdown" && !state.previewOn) togglePreview();
   const url = new URL(location);
@@ -447,6 +463,23 @@ registerCommand("hr", {
   run: (args, ctx) => ctx.insert("\n---\n"),
 });
 
+registerCommand("settings", {
+  title: "Open Eddie settings",
+  hint: "~/.eddie/config.json",
+  run: async () => {
+    const q = state.path ? `?path=${encodeURIComponent(state.path)}` : "";
+    const data = await api("GET", `/api/config${q}`);
+    if (!data.globalExists) {
+      await api("PUT", "/api/file", {
+        path: data.globalPath,
+        content: JSON.stringify(data.config, null, 2) + "\n",
+      });
+      setStatus(`created ${data.globalPath}`);
+    }
+    window.open(`/?file=${encodeURIComponent(data.globalPath)}`, "_blank");
+  },
+});
+
 // ---------- linting ----------
 //
 // Linters are per-language and pluggable. A linter fn gets (text, ctx) where
@@ -565,6 +598,7 @@ async function openLintConfig() {
 window.addEventListener("focus", () => {
   lintConfigCache.clear();
   relint();
+  loadConfig();
 });
 
 // Built-in: markdownlint with standard .markdownlint.json config resolution.
@@ -637,7 +671,9 @@ async function refreshGitPanel() {
   }
   // Fetch first so ahead/behind reflects the actual remote, not a stale ref.
   // Best-effort: offline just means counts stay as-is.
-  await api("POST", "/api/git/fetch", { path: state.path }).catch(() => {});
+  if (policy("autofetch") === "auto") {
+    await api("POST", "/api/git/fetch", { path: state.path }).catch(() => {});
+  }
   const [info, diff, log] = await Promise.all([
     api("GET", `/api/git/info?path=${encodeURIComponent(state.path)}`),
     api("GET", `/api/git/diff?path=${encodeURIComponent(state.path)}`),
@@ -660,8 +696,14 @@ async function refreshGitPanel() {
         `${info.ahead && info.behind ? ", " : ""}` +
         `${info.behind ? `${info.behind} behind upstream` : ""}`
       : "in sync with upstream";
+  state.gitInfo = info;
   $("btn-push").textContent = info.ahead ? `Push ↑${info.ahead}` : "Push";
   $("btn-pull").textContent = info.behind ? `Pull ↓${info.behind}` : "Pull";
+  for (const [btn, action] of [["btn-commit", "commit"], ["btn-push", "push"], ["btn-pull", "pull"]]) {
+    const blocked = policy(action) === "never";
+    $(btn).disabled = blocked;
+    $(btn).title = blocked ? `disabled by eddie config (git.${action}: never)` : "";
+  }
   $("git-log").innerHTML = "";
   for (const e of log.log) {
     const div = document.createElement("div");
@@ -687,6 +729,11 @@ async function refreshGitPanel() {
 }
 
 async function pushChanges() {
+  if (policy("push") === "ask") {
+    const i = state.gitInfo;
+    const what = i?.ahead ? `${i.ahead} commit${i.ahead === 1 ? "" : "s"}` : "commits";
+    if (!confirm(`Push ${what} to ${i?.remote || "the remote"}?`)) return;
+  }
   const btn = $("btn-push");
   btn.disabled = true;
   btn.textContent = "Pushing…";
@@ -707,6 +754,17 @@ async function pushChanges() {
 }
 
 async function pullChanges() {
+  if (policy("pull") === "ask") {
+    const i = state.gitInfo;
+    const strategy = policy("pullStrategy");
+    const msg =
+      i && i.ahead && i.behind
+        ? `Remote and local have diverged. ${strategy === "merge" ? "Merge" : "Rebase"} ${i.ahead} local commit${i.ahead === 1 ? "" : "s"} ${strategy === "merge" ? "with" : "onto"} ${i.behind} remote commit${i.behind === 1 ? "" : "s"}?`
+        : i && i.behind
+          ? `Pull ${i.behind} commit${i.behind === 1 ? "" : "s"} from ${i.remote || "the remote"}?`
+          : `Pull from ${i?.remote || "the remote"}?`;
+    if (!confirm(msg)) return;
+  }
   const btn = $("btn-pull");
   btn.disabled = true;
   btn.textContent = "Pulling…";
@@ -730,6 +788,7 @@ async function pullChanges() {
 async function commitFile() {
   const message = $("commit-msg").value.trim();
   if (!message) return setStatus("enter a commit message");
+  if (policy("commit") === "ask" && !confirm(`Commit "${message}"${state.gitInfo ? ` on ${state.gitInfo.branch}` : ""}?`)) return;
   try {
     const r = await api("POST", "/api/git/commit", { path: state.path, message });
     $("commit-msg").value = "";

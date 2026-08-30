@@ -38,8 +38,19 @@ All paths are absolute (a leading `~` is expanded). Responses are JSON.
 - `POST /api/git/push` with `{"path": "…"}` → `git push` from that file's repo
   (adds `--set-upstream origin <branch>` when the branch has no upstream)
 - `POST /api/git/fetch` with `{"path": "…"}` → `git fetch` (refreshes ahead/behind)
-- `POST /api/git/pull` with `{"path": "…"}` → `git pull --rebase --autostash`;
-  on conflict the rebase is aborted (repo left clean) and an error is returned
+- `POST /api/git/pull` with `{"path": "…"}` → pulls using the configured
+  `git.pullStrategy` (default `rebase` + autostash); on conflict the
+  rebase/merge is aborted (repo left clean) and an error is returned
+
+### Behavior policy
+
+- `GET /api/config?path=…` → `{config, globalPath, globalExists, projectPath}` —
+  the effective eddie config: defaults ← `~/.eddie/config.json` ← nearest
+  `.eddie.json` walking up from the file.
+- Actions set to `"never"` are enforced server-side: commit/push/pull return
+  **403** with an explanatory error. Respect it — don't try to work around it
+  with raw git. `"ask"` is a UI confirmation; API calls made by the user's own
+  agent are treated as authorized and proceed.
 
 ### Linting
 

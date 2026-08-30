@@ -92,6 +92,38 @@ In the editor:
   Finder-style file picker and inserts a relative markdown link to the chosen
   doc. Plugins add their own commands via `eddie.registerCommand`
 
+## Configuration
+
+Eddie has a behavior policy system: each action is `"auto"` (just do it),
+`"ask"` (confirm first), or `"never"` (blocked — enforced by the server, so
+API callers and agents are refused too). Run `/settings` (Cmd+K → settings)
+to open the global config, `~/.eddie/config.json`, created with defaults on
+first use:
+
+```json
+{
+  "git": {
+    "commit": "auto",
+    "push": "auto",
+    "pull": "ask",
+    "autofetch": "auto",
+    "pullStrategy": "rebase"
+  }
+}
+```
+
+- `pull` defaults to `"ask"` because pulling can rebase your local commits —
+  the confirmation says exactly what will happen ("Rebase 2 local commits
+  onto 1 remote commit?"). `commit`/`push` default to `"auto"` since clicking
+  the button is already explicit.
+- `pullStrategy`: `rebase` (linear history, with autostash), `merge`, or
+  `ff-only` (refuse to pull when histories diverge).
+- A `.eddie.json` in a repo (found walking up from the file, like lint
+  configs) overrides the global config per project — e.g. put
+  `{"git": {"push": "never"}}` in a repo you never want pushed from Eddie.
+
+Config edits apply when you refocus an editor tab.
+
 ## Languages
 
 Markdown, JSON, shell/bash, YAML, JavaScript/TypeScript, CSS, HTML — picked by

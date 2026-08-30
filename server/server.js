@@ -94,6 +94,75 @@ async function gitRoot(fileOrDir) {
   return r.ok ? r.stdout.trim() : null;
 }
 
+// ---------- eddie config (behavior policy) ----------
+// Each action is "auto" (just do it), "ask" (UI confirms first), or "never"
+// (blocked here on the server, so API callers are refused too).
+
+const CONFIG_DEFAULTS = {
+  git: {
+    commit: "auto",
+    push: "auto",
+    pull: "ask",
+    autofetch: "auto",
+    pullStrategy: "rebase", // rebase | merge | ff-only
+  },
+};
+
+function parseJsonc(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return JSON.parse(text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, ""));
+  }
+}
+
+function deepMerge(base, over) {
+  const out = { ...base };
+  for (const [k, v] of Object.entries(over || {})) {
+    out[k] = v && typeof v === "object" && !Array.isArray(v) ? deepMerge(base[k] || {}, v) : v;
+  }
+  return out;
+}
+
+async function loadEddieConfig(fileOrDir) {
+  const globalPath = path.join(EDDIE_HOME, "config.json");
+  let globalCfg = {};
+  let globalExists = false;
+  try {
+    globalCfg = parseJsonc(await fsp.readFile(globalPath, "utf8"));
+    globalExists = true;
+  } catch {
+    /* missing or bad global config -> defaults */
+  }
+  let projectCfg = {};
+  let projectPath = null;
+  const home = os.homedir();
+  let dir = fileOrDir ? path.dirname(fileOrDir) : home;
+  while (true) {
+    try {
+      projectCfg = parseJsonc(await fsp.readFile(path.join(dir, ".eddie.json"), "utf8"));
+      projectPath = path.join(dir, ".eddie.json");
+      break;
+    } catch {
+      /* keep walking */
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir || dir === home) break;
+    dir = parent;
+  }
+  return {
+    config: deepMerge(deepMerge(CONFIG_DEFAULTS, globalCfg), projectCfg),
+    globalPath,
+    globalExists,
+    projectPath,
+  };
+}
+
+async function gitPolicy(file, action) {
+  const { config } = await loadEddieConfig(file);
+  return (config.git || {})[action] || CONFIG_DEFAULTS.git[action] || "auto";
+}
+
 // ---------- recent files ----------
 
 async function loadRecent() {
@@ -263,9 +332,19 @@ const api = {
     const body = JSON.parse((await readBody(req)).toString("utf8"));
     const root = await gitRoot(resolvePath(body.path));
     if (!root) return json(res, 400, { ok: false, error: "not in a git repository" });
-    // Rebase keeps personal history linear; autostash tolerates unsaved
-    // working-tree changes. On conflict, abort so the repo is left clean.
-    const pull = await git(["pull", "--rebase", "--autostash"], root);
+    const file2 = resolvePath(body.path);
+    if ((await gitPolicy(file2, "pull")) === "never")
+      return json(res, 403, { ok: false, error: "pull is disabled by eddie config (git.pull: never)" });
+    const strategy = await gitPolicy(file2, "pullStrategy");
+    const args =
+      strategy === "merge"
+        ? ["pull", "--no-rebase", "--no-edit"]
+        : strategy === "ff-only"
+          ? ["pull", "--ff-only"]
+          : ["pull", "--rebase", "--autostash"];
+    // Rebase (default) keeps personal history linear; autostash tolerates
+    // unsaved working-tree changes. On conflict, abort so the repo is clean.
+    const pull = await git(args, root);
     if (!pull.ok) {
       const conflicted = /CONFLICT|could not apply|needs merge/i.test(pull.stderr + pull.stdout);
       if (conflicted) await git(["rebase", "--abort"], root);
@@ -284,6 +363,8 @@ const api = {
     const file = resolvePath(body.path);
     const root = await gitRoot(file);
     if (!root) return json(res, 400, { ok: false, error: "not in a git repository" });
+    if ((await gitPolicy(file, "push")) === "never")
+      return json(res, 403, { ok: false, error: "push is disabled by eddie config (git.push: never)" });
     let push = await git(["push"], root);
     if (!push.ok && /no upstream|set-upstream|does not match any/i.test(push.stderr)) {
       const branch = await git(["rev-parse", "--abbrev-ref", "HEAD"], root);
@@ -298,6 +379,8 @@ const api = {
     const file = resolvePath(body.path);
     const root = await gitRoot(file);
     if (!root) return json(res, 400, { ok: false, error: "not in a git repository" });
+    if ((await gitPolicy(file, "commit")) === "never")
+      return json(res, 403, { ok: false, error: "commit is disabled by eddie config (git.commit: never)" });
     if (!body.message) return json(res, 400, { ok: false, error: "commit message required" });
     const add = await git(["add", "--", file], root);
     if (!add.ok) return json(res, 500, { ok: false, error: add.stderr });
@@ -322,6 +405,12 @@ const api = {
         );
       })
       .on("error", (e) => json(res, 502, { ok: false, error: e.message }));
+  },
+
+  "GET /api/config": async (req, res, url) => {
+    const p = url.searchParams.get("path");
+    const file = p ? resolvePath(p) : null;
+    json(res, 200, await loadEddieConfig(file));
   },
 
   "GET /api/lint/config": async (req, res, url) => {
