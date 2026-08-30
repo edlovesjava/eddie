@@ -5,6 +5,7 @@
 // /settings). Nothing in core knows chat exists.
 (() => {
   const messages = [];
+  let thread = null; // trace thread id — keeps the conversation auditable
 
   eddie.registerPanel("chat", {
     title: "AI chat (runs your local claude CLI)",
@@ -40,11 +41,12 @@
         const pending = addMsg("assistant", "thinking…", "pending");
         sendBtn.disabled = true;
         try {
-          const body = { messages, path: eddie.getPath() };
+          const body = { messages, path: eddie.getPath(), thread };
           if (el.querySelector("#chat-ctx").checked && eddie.getPath()) {
             body.context = { path: eddie.getPath(), language: eddie.getLanguage(), text: eddie.getText() };
           }
           const r = await eddie.api("POST", "/api/ai/chat", body);
+          thread = r.thread || thread;
           messages.push({ role: "assistant", text: r.reply });
           pending.classList.remove("pending");
           pending.innerHTML = eddie.markdown(r.reply);

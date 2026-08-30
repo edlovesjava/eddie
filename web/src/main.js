@@ -285,6 +285,11 @@ function commandCtx() {
 async function runCommand(name, args = "") {
   const cmd = commands.get(name.toLowerCase().replace(/^\//, ""));
   if (!cmd) return setStatus(`unknown command /${name}`);
+  api("POST", "/api/trace", {
+    kind: "action",
+    context: state.path ? { doc: { path: state.path } } : {},
+    body: { name: "command.ran", command: cmd.name, args: args.trim() },
+  }).catch(() => {});
   try {
     await cmd.run(args.trim(), commandCtx());
   } catch (e) {
@@ -461,6 +466,11 @@ registerCommand("date", {
 registerCommand("hr", {
   title: "Insert a horizontal rule",
   run: (args, ctx) => ctx.insert("\n---\n"),
+});
+
+registerCommand("lint", {
+  title: "Toggle the lint panel",
+  run: () => toggleLintPanel(),
 });
 
 registerCommand("settings", {
@@ -690,6 +700,280 @@ function togglePanel(id) {
     .querySelectorAll("#panel-buttons button")
     .forEach((b) => b.classList.toggle("active", b.id === `panel-btn-${id}`));
   spec.onShow?.(el);
+}
+
+// ---------- trace client: SSE tail, recommendations, eddie icon ----------
+
+const recordHandlers = new Set();
+let liveRecs = new Map(); // id -> recommendation record
+
+function connectEvents() {
+  const es = new EventSource("/api/events");
+  es.onmessage = (e) => {
+    let rec;
+    try {
+      rec = JSON.parse(e.data);
+    } catch {
+      return;
+    }
+    for (const fn of recordHandlers) {
+      try {
+        fn(rec);
+      } catch (err) {
+        console.warn("record handler failed:", err);
+      }
+    }
+    handleRecord(rec);
+  };
+  // EventSource reconnects automatically on error.
+}
+
+function handleRecord(rec) {
+  if (rec.kind === "message" && rec.body.subtype === "recommendation") {
+    for (const [id, r] of liveRecs) {
+      if (r.body.dupeKey === rec.body.dupeKey) liveRecs.delete(id);
+    }
+    liveRecs.set(rec.id, rec);
+    if (rec.body.severity === "warn") toast(rec.body.text);
+    if (rec.body.severity !== "passive") pulseEddie();
+    renderRecsUI();
+  } else if (rec.cause && rec.cause.some((id) => liveRecs.has(id)) && rec.kind !== "outcome") {
+    for (const id of rec.cause) liveRecs.delete(id);
+    renderRecsUI();
+  }
+  if (isPanelOpen("history")) renderHistory();
+}
+
+async function refreshRecs() {
+  try {
+    const { recommendations } = await api("GET", "/api/recommendations");
+    liveRecs = new Map(recommendations.map((r) => [r.id, r]));
+    renderRecsUI();
+  } catch {
+    /* server may be restarting */
+  }
+}
+
+function renderRecsUI() {
+  const icon = $("eddie-icon");
+  icon.textContent = liveRecs.size ? `✦ ${liveRecs.size}` : "✦";
+  icon.classList.toggle("has-recs", liveRecs.size > 0);
+  renderBadges();
+  if (isPanelOpen("recs")) renderRecsPanel();
+}
+
+function renderBadges() {
+  document.querySelectorAll(".rec-badge").forEach((b) => b.remove());
+  const counts = {};
+  for (const r of liveRecs.values()) {
+    const a = r.body.anchor;
+    if (a && a.type === "ui") counts[a.target] = (counts[a.target] || 0) + 1;
+  }
+  for (const [target, n] of Object.entries(counts)) {
+    let el = null;
+    if (target.startsWith("panel:")) el = document.getElementById(`panel-btn-${target.slice(6)}`);
+    else if (target.startsWith("element:")) el = document.getElementById(target.slice(8));
+    if (!el) continue;
+    const b = document.createElement("span");
+    b.className = "rec-badge";
+    b.textContent = n;
+    el.style.position = "relative";
+    el.appendChild(b);
+  }
+}
+
+function toast(text) {
+  const div = document.createElement("div");
+  div.className = "toast";
+  div.textContent = text;
+  div.onclick = () => div.remove();
+  $("toasts").appendChild(div);
+  setTimeout(() => div.remove(), 8000);
+}
+
+function pulseEddie() {
+  const icon = $("eddie-icon");
+  icon.classList.remove("pulse");
+  void icon.offsetWidth; // restart the animation
+  icon.classList.add("pulse");
+}
+
+function recordOutcome(rec, valence) {
+  return api("POST", "/api/trace", {
+    kind: "outcome",
+    cause: [rec.id],
+    thread: rec.thread,
+    body: { valence, source: "explicit" },
+  });
+}
+
+function settleRec(rec, how) {
+  liveRecs.delete(rec.id);
+  renderRecsUI();
+  return api("POST", "/api/recommend/settle", { id: rec.id, how }).catch(() => {});
+}
+
+function runRecAction(rec, action) {
+  if (action.command.startsWith("panel:")) togglePanel(action.command.slice(6));
+  else {
+    const [name, ...rest] = action.command.split(" ");
+    runCommand(name, rest.join(" "));
+  }
+  settleRec(rec, "applied");
+}
+
+// ---- recommendations panel ----
+
+registerPanel("recs", {
+  title: "Eddie recommendations",
+  button: "✦",
+  render(el) {
+    el.innerHTML = `<h3>eddie recommends</h3><div id="recs-list"></div>`;
+  },
+  onShow: () => renderRecsPanel(),
+});
+
+function renderRecsPanel() {
+  const list = $("recs-list");
+  if (!list) return;
+  list.innerHTML = liveRecs.size ? "" : "<em>nothing right now</em>";
+  for (const rec of [...liveRecs.values()].reverse()) {
+    const card = document.createElement("div");
+    card.className = `rec-card ${rec.body.severity}`;
+    const text = document.createElement("div");
+    text.textContent = rec.body.text;
+    const prov = document.createElement("div");
+    prov.className = "prov";
+    prov.textContent = `${rec.actor.kind}:${rec.body.producer}`;
+    const actions = document.createElement("div");
+    actions.className = "rec-actions";
+    for (const a of rec.body.actions || []) {
+      const btn = document.createElement("button");
+      btn.textContent = a.label;
+      btn.onclick = () => runRecAction(rec, a);
+      actions.appendChild(btn);
+    }
+    for (const [glyph, valence] of [["👍", "good"], ["👎", "bad"]]) {
+      const fb = document.createElement("button");
+      fb.className = "fb";
+      fb.textContent = glyph;
+      fb.title = `this was a ${valence} recommendation`;
+      fb.onclick = () => {
+        recordOutcome(rec, valence);
+        fb.disabled = true;
+        setStatus("feedback recorded");
+      };
+      actions.appendChild(fb);
+    }
+    const dismiss = document.createElement("button");
+    dismiss.className = "fb";
+    dismiss.textContent = "✕";
+    dismiss.title = "dismiss";
+    dismiss.onclick = () => settleRec(rec, "dismissed");
+    actions.appendChild(dismiss);
+    const why = document.createElement("button");
+    why.className = "why";
+    why.textContent = "why?";
+    why.onclick = () => showChain(rec.id, list, renderRecsPanel);
+    actions.appendChild(why);
+    card.append(text, prov, actions);
+    list.appendChild(card);
+  }
+}
+
+// ---- history panel ----
+
+registerPanel("history", {
+  title: "Trace history — everything eddie saw and did",
+  button: "History",
+  render(el) {
+    el.innerHTML = `
+      <h3>history</h3>
+      <select id="hist-filter">
+        <option value="">everything</option>
+        <option value="action">actions</option>
+        <option value="message">messages</option>
+        <option value="decision,outcome">decisions & outcomes</option>
+        <option value="event">events</option>
+      </select>
+      <div id="hist-list"></div>`;
+    el.querySelector("#hist-filter").onchange = renderHistory;
+  },
+  onShow: () => renderHistory(),
+});
+
+function recordSummary(r) {
+  return (
+    r.body.name ||
+    (r.body.text && r.body.text.slice(0, 70)) ||
+    r.body.subtype ||
+    r.body.choice ||
+    (r.body.valence && `outcome: ${r.body.valence}`) ||
+    r.kind
+  );
+}
+
+async function renderHistory() {
+  const list = $("hist-list");
+  if (!list) return;
+  const kinds = $("hist-filter").value;
+  const { records } = await api("GET", `/api/trace?limit=80${kinds ? `&kinds=${kinds}` : ""}`);
+  list.innerHTML = records.length ? "" : "<em>no records yet</em>";
+  for (const r of records) {
+    const row = document.createElement("div");
+    row.className = "hist-row";
+    const kind = document.createElement("span");
+    kind.className = "kind";
+    kind.textContent = r.kind;
+    const summary = document.createElement("span");
+    summary.textContent = recordSummary(r);
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.textContent = `${new Date(r.ts).toLocaleTimeString()} · ${r.actor.kind}:${r.actor.id}`;
+    row.append(kind, summary, meta);
+    row.onclick = () => showChain(r.id, list, renderHistory);
+    list.appendChild(row);
+  }
+}
+
+// Render a cause chain ("why?") into a container, with a back link.
+async function showChain(id, container, back) {
+  const { chain } = await api("GET", `/api/trace/chain?id=${encodeURIComponent(id)}`);
+  container.innerHTML = "";
+  const backBtn = document.createElement("button");
+  backBtn.textContent = "← back";
+  backBtn.onclick = back;
+  container.appendChild(backBtn);
+  chain.forEach((layer, i) => {
+    if (i > 0) {
+      const arrow = document.createElement("div");
+      arrow.className = "chain-arrow";
+      arrow.textContent = "▲ because";
+      container.appendChild(arrow);
+    }
+    const div = document.createElement("div");
+    div.className = "chain-layer";
+    for (const r of layer) {
+      const row = document.createElement("div");
+      row.className = "hist-row";
+      if (r.missing) {
+        row.textContent = `${r.id} (older than the in-memory window)`;
+      } else {
+        row.innerHTML = "";
+        const kind = document.createElement("span");
+        kind.className = "kind";
+        kind.textContent = r.kind;
+        const summary = document.createElement("span");
+        summary.textContent = recordSummary(r);
+        const meta = document.createElement("div");
+        meta.className = "meta";
+        meta.textContent = `${new Date(r.ts).toLocaleTimeString()} · ${r.actor.kind}:${r.actor.id}`;
+        row.append(kind, summary, meta);
+      }
+      div.appendChild(row);
+    }
+    container.appendChild(div);
+  });
 }
 
 // ---------- git ----------
@@ -949,6 +1233,12 @@ const eddie = {
   togglePanel,
   isPanelOpen,
   markdown: (text) => marked.parse(text),
+  recommend: ({ producer, anchor, severity, text, actions, resolveOn }) =>
+    api("POST", "/api/recommend", { producer, anchor, severity, text, actions, resolveOn, actor: { kind: "rule", id: producer } }),
+  resolveRecommendation: (producer, anchor) =>
+    api("POST", "/api/recommend/settle", { producer, anchor, how: "resolved" }),
+  onRecord: (fn) => recordHandlers.add(fn),
+  trace: (record) => api("POST", "/api/trace", record),
   relint,
   openLintConfig,
   onSave: (fn) => state.saveHooks.push(fn),
@@ -1014,6 +1304,10 @@ document.addEventListener("keydown", (e) => {
 window.addEventListener("beforeunload", (e) => {
   if (state.dirty) e.preventDefault();
 });
+
+$("eddie-icon").onclick = () => togglePanel("recs");
+connectEvents();
+refreshRecs();
 
 const fileParam = new URLSearchParams(location.search).get("file");
 if (fileParam) {

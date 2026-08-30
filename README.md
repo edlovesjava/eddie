@@ -115,6 +115,25 @@ the current document ("include document" sends the live buffer as context),
 Cmd+Enter to send. Swap the backend with `ai.command`/`ai.args` in
 `/settings`, or disable it entirely with `"ai": {"chat": "never"}`.
 
+## The trace, recommendations, and the ✦ icon
+
+Eddie keeps an append-only **trace** of everything notable — saves, commits,
+pushes, commands, chat turns, recommendations, your decisions on them — each
+record carrying who did it, when, in what context, and *why* (causality
+links). The **History** panel shows it; every entry answers "why?" by
+walking its cause chain. It's the substrate for the AI integration roadmap
+(`docs/design/ai-integration.md`), and it's local, in
+`~/.eddie/trace/*.jsonl`.
+
+**Recommendations** ride on it: rule producers (e.g. unpushed commits, a
+lint pile-up) surface cards anchored to the relevant UI — a badge appears on
+the feature, the **✦** icon in the status bar shows the count (click it for
+the panel), and `warn`-level items toast. Cards offer actions, dismiss, and
+**👍/👎 feedback** — judgments are recorded as outcomes so Eddie can learn
+what's welcome (the learning loop in the design doc). Recommendations
+auto-resolve when their condition clears (push your commits and the
+reminder silently disappears).
+
 ## Configuration
 
 Eddie has a behavior policy system: each action is `"auto"` (just do it),

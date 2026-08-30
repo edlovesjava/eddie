@@ -9,6 +9,8 @@ const fsp = require("fs/promises");
 const path = require("path");
 const os = require("os");
 const { execFile, spawn } = require("child_process");
+const crypto = require("crypto");
+const trace = require("./trace");
 
 const PORT = parseInt(process.env.EDDIE_PORT || "4517", 10);
 const HOST = "127.0.0.1";
@@ -168,6 +170,63 @@ async function gitPolicy(file, action) {
   return (config.git || {})[action] || CONFIG_DEFAULTS.git[action] || "auto";
 }
 
+// ---------- trace helpers & recommendations ----------
+
+function sha(text) {
+  return "sha256:" + crypto.createHash("sha256").update(text).digest("hex").slice(0, 16);
+}
+
+// Live recommendations: message records with body.subtype "recommendation"
+// that haven't been settled (applied/dismissed/resolved). Coalesced by
+// producer+anchor so a producer updates its card instead of stacking.
+const liveRecs = new Map(); // id -> record
+
+function upsertRecommendation({ producer, anchor, severity, text, actions, resolveOn, cause, actor }) {
+  const dupeKey = `${producer}|${JSON.stringify(anchor || { type: "general" })}`;
+  const existing = [...liveRecs.values()].find((r) => r.body.dupeKey === dupeKey);
+  if (existing && existing.body.text === text) return existing;
+  if (existing) liveRecs.delete(existing.id);
+  const rec = trace.append({
+    kind: "message",
+    actor: actor || { kind: "rule", id: producer },
+    thread: existing ? existing.thread : undefined,
+    cause: existing ? [existing.id, ...(cause || [])] : cause || [],
+    body: {
+      subtype: "recommendation",
+      producer,
+      dupeKey,
+      anchor: anchor || { type: "general" },
+      severity: severity || "passive",
+      text,
+      actions: actions || [],
+      resolveOn: resolveOn || null,
+    },
+  });
+  liveRecs.set(rec.id, rec);
+  return rec;
+}
+
+function settleRecommendation(id, how, actor, note) {
+  const rec = liveRecs.get(id);
+  if (!rec) return null;
+  liveRecs.delete(id);
+  return trace.append({
+    kind: how === "resolved" ? "event" : "decision",
+    actor: actor || { kind: "system", id: "eddie" },
+    thread: rec.thread,
+    cause: [id],
+    body: how === "resolved" ? { name: "recommendation.resolved" } : { choice: how, note },
+  });
+}
+
+// Auto-resolve: any event record whose body.name matches a live rec's resolveOn.
+trace.subscribe((rec) => {
+  if (!rec.body.name || rec.kind === "decision") return;
+  for (const [id, r] of liveRecs) {
+    if (r.body.resolveOn === rec.body.name) settleRecommendation(id, "resolved", { kind: "system", id: "auto-resolve" });
+  }
+});
+
 // ---------- recent files ----------
 
 async function loadRecent() {
@@ -240,6 +299,13 @@ const api = {
     await fsp.mkdir(path.dirname(file), { recursive: true });
     await fsp.writeFile(file, body.content, "utf8");
     await touchRecent(file);
+    trace.append({
+      kind: "action",
+      actor: body.actor || { kind: "human", id: "ui" },
+      thread: body.thread,
+      context: { doc: { path: file, hash: sha(body.content) } },
+      body: { name: "file.saved", path: file, bytes: Buffer.byteLength(body.content, "utf8") },
+    });
     json(res, 200, { ok: true, path: file, bytes: Buffer.byteLength(body.content, "utf8") });
   },
 
@@ -277,6 +343,17 @@ const api = {
     const userName = await git(["config", "user.name"], root);
     const userEmail = await git(["config", "user.email"], root);
     const remote = await git(["remote", "get-url", "--push", "origin"], root);
+    // Rule producer: remind about unpushed commits; resolves itself on push.
+    if (ahead > 0) {
+      upsertRecommendation({
+        producer: "unpushed",
+        anchor: { type: "ui", target: "panel:git" },
+        severity: ahead >= 3 ? "notice" : "passive",
+        text: `${ahead} commit${ahead === 1 ? "" : "s"} on ${branch.stdout.trim()} not pushed to ${remote.ok ? remote.stdout.trim() : "the remote"}`,
+        actions: [{ label: "Open Git panel", command: "panel:git" }],
+        resolveOn: "git.pushed",
+      });
+    }
     json(res, 200, {
       root,
       branch: branch.ok ? branch.stdout.trim() : null,
@@ -360,6 +437,11 @@ const api = {
           : (pull.stderr || pull.stdout).trim(),
       });
     }
+    trace.append({
+      kind: "action",
+      actor: { kind: "human", id: "ui" },
+      body: { name: "git.pulled", repo: root },
+    });
     json(res, 200, { ok: true, output: (pull.stdout || pull.stderr).trim() });
   },
 
@@ -376,6 +458,11 @@ const api = {
       push = await git(["push", "--set-upstream", "origin", branch.stdout.trim()], root);
     }
     if (!push.ok) return json(res, 500, { ok: false, error: (push.stderr || push.stdout).trim() });
+    trace.append({
+      kind: "action",
+      actor: { kind: "human", id: "ui" },
+      body: { name: "git.pushed", repo: root },
+    });
     json(res, 200, { ok: true, output: (push.stderr || push.stdout).trim() || "pushed" });
   },
 
@@ -391,6 +478,12 @@ const api = {
     if (!add.ok) return json(res, 500, { ok: false, error: add.stderr });
     const commit = await git(["commit", "-m", body.message, "--", file], root);
     if (!commit.ok) return json(res, 500, { ok: false, error: commit.stderr || commit.stdout });
+    trace.append({
+      kind: "action",
+      actor: { kind: "human", id: "ui" },
+      context: { doc: { path: file } },
+      body: { name: "git.committed", message: body.message, repo: root },
+    });
     json(res, 200, { ok: true, output: commit.stdout.trim() });
   },
 
@@ -476,6 +569,16 @@ const api = {
       parts.push(`${m.role === "user" ? "User" : "Assistant"}: ${m.text}`);
     }
     const prompt = parts.join("\n");
+    const last = (body.messages || []).slice(-1)[0];
+    const userMsg = last
+      ? trace.append({
+          kind: "message",
+          actor: { kind: "human", id: "chat" },
+          thread: body.thread,
+          context: body.context ? { doc: { path: body.context.path, hash: sha(body.context.text || "") } } : {},
+          body: { subtype: "chat", role: "user", text: last.text },
+        })
+      : null;
     const child = spawn(ai.command, ai.args, { stdio: ["pipe", "pipe", "pipe"] });
     let out = "";
     let errOut = "";
@@ -501,10 +604,93 @@ const api = {
     });
     child.on("close", (code) => {
       clearTimeout(timer);
-      if (code === 0) finish(200, { ok: true, reply: out.trim() });
+      if (code === 0) {
+        const reply = trace.append({
+          kind: "message",
+          actor: { kind: "agent", id: "chat" },
+          thread: userMsg ? userMsg.thread : body.thread,
+          cause: userMsg ? [userMsg.id] : [],
+          body: { subtype: "chat", role: "assistant", text: out.trim() },
+        });
+        return finish(200, { ok: true, reply: out.trim(), thread: reply.thread, record: reply.id });
+      }
       else finish(500, { ok: false, error: (errOut || out || `${ai.command} exited with ${code}`).trim().slice(0, 2000) });
     });
     child.stdin.end(prompt);
+  },
+
+  // ---- trace & recommendations ----
+
+  "GET /api/events": async (req, res) => {
+    // SSE: the live tail of the trace log.
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-store",
+      Connection: "keep-alive",
+    });
+    res.write(": connected\n\n");
+    const unsub = trace.subscribe((rec) => res.write(`data: ${JSON.stringify(rec)}\n\n`));
+    const heartbeat = setInterval(() => res.write(": hb\n\n"), 25000);
+    req.on("close", () => {
+      unsub();
+      clearInterval(heartbeat);
+    });
+  },
+
+  "GET /api/trace": async (req, res, url) => {
+    const p = url.searchParams;
+    json(res, 200, {
+      records: trace.query({
+        kinds: p.get("kinds") ? p.get("kinds").split(",") : undefined,
+        thread: p.get("thread") || undefined,
+        actorKind: p.get("actor") || undefined,
+        limit: Math.min(parseInt(p.get("limit") || "100", 10), 500),
+      }),
+    });
+  },
+
+  "GET /api/trace/chain": async (req, res, url) => {
+    json(res, 200, { chain: trace.chain(url.searchParams.get("id")) });
+  },
+
+  "POST /api/trace": async (req, res) => {
+    // Client-side ingest: UI actions, outcomes (👍/👎), human messages.
+    const body = JSON.parse((await readBody(req, 256 * 1024)).toString("utf8"));
+    if (!trace.KINDS.includes(body.kind)) return json(res, 400, { ok: false, error: "bad kind" });
+    const rec = trace.append({
+      kind: body.kind,
+      actor: body.actor || { kind: "human", id: "ui" },
+      thread: body.thread,
+      cause: body.cause,
+      context: body.context,
+      body: body.body || {},
+    });
+    json(res, 200, { ok: true, record: rec });
+  },
+
+  "GET /api/recommendations": async (req, res) => {
+    json(res, 200, { recommendations: [...liveRecs.values()] });
+  },
+
+  "POST /api/recommend": async (req, res) => {
+    const body = JSON.parse((await readBody(req)).toString("utf8"));
+    if (!body.text || !body.producer) return json(res, 400, { ok: false, error: "producer and text required" });
+    const rec = upsertRecommendation(body);
+    json(res, 200, { ok: true, record: rec });
+  },
+
+  "POST /api/recommend/settle": async (req, res) => {
+    // {id, how: applied|dismissed|snoozed|resolved} or {producer, anchor, how: resolved}
+    const body = JSON.parse((await readBody(req)).toString("utf8"));
+    let id = body.id;
+    if (!id && body.producer) {
+      const dupeKey = `${body.producer}|${JSON.stringify(body.anchor || { type: "general" })}`;
+      const match = [...liveRecs.values()].find((r) => r.body.dupeKey === dupeKey);
+      id = match && match.id;
+    }
+    if (!id || !liveRecs.has(id)) return json(res, 200, { ok: true, settled: false });
+    const rec = settleRecommendation(id, body.how || "dismissed", body.actor || { kind: "human", id: "ui" }, body.note);
+    json(res, 200, { ok: true, settled: true, record: rec });
   },
 
   "GET /api/plugins": async (req, res) => {
@@ -575,6 +761,7 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+trace.init();
 server.listen(PORT, HOST, () => {
   console.log(`eddie server v${VERSION} listening on http://${HOST}:${PORT}`);
 });
