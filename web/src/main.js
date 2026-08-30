@@ -725,8 +725,11 @@ function togglePanel(id) {
 const recordHandlers = new Set();
 let liveRecs = new Map(); // id -> recommendation record
 
+let eventSource = null; // module-level ref: guards against GC and allows reconnect
+
 function connectEvents() {
-  const es = new EventSource("/api/events");
+  if (eventSource) eventSource.close();
+  const es = (eventSource = new EventSource("/api/events"));
   es.onmessage = (e) => {
     let rec;
     try {
@@ -782,6 +785,7 @@ function renderRecsUI() {
 
 function renderBadges() {
   document.querySelectorAll(".rec-badge").forEach((b) => b.remove());
+  document.querySelectorAll(".has-badge").forEach((el) => el.classList.remove("has-badge"));
   const counts = Object.create(null);
   for (const r of liveRecs.values()) {
     const a = r.body.anchor;
@@ -795,7 +799,7 @@ function renderBadges() {
     const b = document.createElement("span");
     b.className = "rec-badge";
     b.textContent = n;
-    el.style.position = "relative";
+    el.classList.add("has-badge");
     el.appendChild(b);
   }
 }

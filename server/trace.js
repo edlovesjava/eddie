@@ -57,17 +57,24 @@ function newId() {
 }
 
 // Append a record. Fills in id/ts/defaults; returns the full record.
+function isObject(v) {
+  return v && typeof v === "object" && !Array.isArray(v);
+}
+
 function append(partial) {
   if (!KINDS.includes(partial.kind)) throw new Error(`bad record kind: ${partial.kind}`);
+  // Coerce inputs to safe shapes at the boundary — POST /api/trace accepts
+  // client records, and chain()/the UI rely on these invariants.
+  const actor = isObject(partial.actor) ? partial.actor : { kind: "system", id: "eddie" };
   const rec = {
     id: newId(),
     ts: new Date().toISOString(),
-    actor: partial.actor || { kind: "system", id: "eddie" },
-    thread: partial.thread || null,
-    cause: partial.cause || [],
-    context: partial.context || {},
+    actor: { kind: String(actor.kind || "system"), id: String(actor.id || "eddie") },
+    thread: typeof partial.thread === "string" ? partial.thread : null,
+    cause: Array.isArray(partial.cause) ? partial.cause.filter((c) => typeof c === "string") : [],
+    context: isObject(partial.context) ? partial.context : {},
     kind: partial.kind,
-    body: partial.body || {},
+    body: isObject(partial.body) ? partial.body : {},
   };
   if (!rec.thread) rec.thread = `t_${rec.id.slice(2)}`;
   // Synchronous append: this is the auditable substrate, so a record is on

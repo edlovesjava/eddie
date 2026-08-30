@@ -231,6 +231,7 @@ button:hover { border-color: var(--accent); color: var(--accent); }
   box-shadow: 0 6px 20px rgba(0, 0, 0, .2);
   max-width: 340px;
 }
+.has-badge { position: relative; }
 .rec-badge {
   position: absolute;
   top: -6px;
