@@ -177,13 +177,25 @@ integration (open-from-URL in the UI, gists) is on the roadmap.
 ## Layout
 
 ```text
-bin/eddie.js        CLI: health-check, start server, open browser
-server/server.js    localhost HTTP server + JSON API (no dependencies)
-web/                frontend: CodeMirror 6 app (esbuild-bundled)
-plugins/            built-in plugins + plugin docs
-scripts/            Finder app installer
-docs/AGENTS.md      the API, written for agents
+bin/eddie.js          CLI: health-check, start server, open browser
+server/server.js      localhost HTTP server + JSON API (no dependencies)
+web/                  frontend: CodeMirror 6 app (esbuild-bundled)
+plugins/              built-in plugins + plugin docs
+scripts/              Finder app installer
+CLAUDE.md             working posture for agent sessions in this repo
+docs/ARCHITECTURE.md  system map, extension points, invariants
+docs/adr/             architecture decision records
+docs/AGENTS.md        the API, written for agents
 ```
+
+## Contributing (mostly by agents)
+
+Development is agentic-first: the human expresses intent, agents write most
+of the code, hand-coded contributions welcome. Start with
+[CLAUDE.md](CLAUDE.md) for the working posture,
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) before building, and
+[docs/adr/](docs/adr/README.md) for decisions already made. Changes land on
+feature branches (`feat/… fix/… docs/…`) and merge to `main` after review.
 
 ## Roadmap ideas
 
