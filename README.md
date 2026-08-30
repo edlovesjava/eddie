@@ -26,12 +26,12 @@ right-click → Open With → Eddie):
 bash scripts/install-finder-app.sh
 ```
 
-[package](package.json) 
+[package](package.json)
+
 | Col 1 | Col 2 | Col 3 |
 | --- | --- | --- |
-|     |     |     |
-|     |     |     |
-
+| D11 | D12 | D13 |
+| D21 | D22 | D23 |
 
 ## Use
 
