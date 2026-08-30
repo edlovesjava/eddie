@@ -27,7 +27,7 @@ Plugins use the global `window.eddie` object:
 | `eddie.registerPanel(id, {title, button?, render, onShow?, onHide?})` | add a dock panel with its own toolbar button (see below) |
 | `eddie.togglePanel(id)` / `eddie.isPanelOpen(id)` | open/close or query a panel |
 | `eddie.markdown(text)` | render markdown to HTML (same renderer as the preview) |
-| `eddie.recommend({producer, text, anchor?, severity?, actions?, resolveOn?})` | surface a recommendation (see lint-advisor.js for a producer example) |
+| `eddie.recommend({producer, text, anchor?, severity?, actions?, resolveOn?})` | surface a recommendation (lint-advisor.js: UI-anchored; link-checker.js: doc-anchored — pinned to text with `anchor: {type: "doc", path, quote, prefix, suffix, offset}`) |
 | `eddie.resolveRecommendation(producer, anchor)` | resolve your own recommendation when its condition clears |
 | `eddie.onRecord(fn)` | subscribe to the live trace stream — `fn(record)` for every new record; returns an unsubscribe function |
 | `eddie.trace(record)` | append a record to the trace (`{kind, body, cause?, thread?}`) |

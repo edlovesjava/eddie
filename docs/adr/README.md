@@ -17,3 +17,4 @@ made (new dependency, subsystem, protocol, changed default). Use
 | [0008](0008-ai-via-local-cli.md) | AI features shell out to a local CLI (`claude -p`), no API keys | accepted |
 | [0009](0009-feature-branch-workflow.md) | Feature-branch workflow; `main` is merged to after review | accepted |
 | [0010](0010-trace-log-substrate.md) | The trace log is the substrate; the event bus is its tail | accepted |
+| [0011](0011-anchored-recommendations.md) | Recommendations are annotations — anchored by content, not coordinates | accepted |
