@@ -235,6 +235,12 @@ button:hover { border-color: var(--accent); color: var(--accent); }
 .eddie-anchor { background: rgba(37, 99, 235, .10); border-bottom: 1px dotted var(--accent); cursor: pointer; }
 .eddie-anchor.notice { background: rgba(37, 99, 235, .16); }
 .eddie-anchor.warn { background: rgba(220, 38, 38, .12); border-bottom-color: var(--danger); }
+.eddie-anchor.proposal { background: rgba(124, 58, 237, .12); border-bottom-color: #7c3aed; }
+.eddie-gutter-mark.proposal { color: #7c3aed; }
+@media (prefers-color-scheme: dark) { .eddie-gutter-mark.proposal { color: #a78bfa; } }
+.patch-diff { font-family: ui-monospace, monospace; font-size: 12px; margin-top: 6px; border-radius: 6px; overflow: hidden; }
+.patch-diff .del { background: rgba(220, 38, 38, .12); padding: 3px 8px; text-decoration: line-through; white-space: pre-wrap; }
+.patch-diff .ins { background: rgba(22, 163, 74, .14); padding: 3px 8px; white-space: pre-wrap; }
 .cm-eddie-gutter { width: 14px; }
 .eddie-gutter-mark { color: var(--accent); cursor: pointer; font-size: 11px; }
 .eddie-gutter-mark.warn { color: var(--danger); }

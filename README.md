@@ -63,7 +63,14 @@ In the editor:
 - **Lint** runs as you type: [markdownlint](https://github.com/DavidAnson/markdownlint)
   for Markdown and syntax checking for JSON, with squiggles, gutter markers, a
   ⚠ count in the status bar, and a diagnostics panel (**Lint** button). Other
-  languages plug in via `eddie.registerLinter`.
+  languages plug in via `eddie.registerLinter`. Every markdown lint issue
+  carries an eddie glyph: **✦ fix** (a deterministic fix from markdownlint)
+  or **✦ ask eddie** (your local `claude` CLI drafts one). Either way you
+  get a **proposal** pinned to the line — a red/green diff in a popover with
+  **Apply**, 👍/👎, and dismiss. Nothing touches your text until you apply
+  (set `"ai": {"edit": "auto"}` to auto-apply, or `"never"` to disable
+  proposals entirely). Applied fixes trace the full chain: proposal → your
+  decision → the edit.
 - **Lint ⚙** opens the linter config. Markdown uses standard
   `.markdownlint.json` files — the nearest one walking up from your file wins
   (so per-project configs just work), else `~/.eddie/markdownlint.json`, which

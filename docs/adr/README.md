@@ -18,3 +18,4 @@ made (new dependency, subsystem, protocol, changed default). Use
 | [0009](0009-feature-branch-workflow.md) | Feature-branch workflow; `main` is merged to after review | accepted |
 | [0010](0010-trace-log-substrate.md) | The trace log is the substrate; the event bus is its tail | accepted |
 | [0011](0011-anchored-recommendations.md) | Recommendations are annotations — anchored by content, not coordinates | accepted |
+| [0012](0012-proposals-and-decisions.md) | Mutations offered by rules/AI are proposals — patch, decision, applied action | accepted |

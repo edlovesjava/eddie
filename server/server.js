@@ -110,6 +110,7 @@ const CONFIG_DEFAULTS = {
   },
   ai: {
     chat: "auto", // auto | never
+    edit: "ask", // proposals with patches: auto (apply on arrival) | ask | never
     command: "claude", // CLI that answers chat prompts (prompt on stdin)
     args: ["-p"],
   },
@@ -190,18 +191,20 @@ function anchorKey(anchor) {
   return JSON.stringify(a);
 }
 
-function upsertRecommendation({ producer, anchor, severity, text, actions, resolveOn, cause, actor }) {
+function upsertRecommendation({ producer, anchor, severity, text, actions, resolveOn, cause, actor, patch }) {
   const dupeKey = `${producer}|${anchorKey(anchor)}`;
   const existing = [...liveRecs.values()].find((r) => r.body.dupeKey === dupeKey);
-  if (existing && existing.body.text === text) return existing;
+  if (existing && existing.body.text === text && !patch) return existing;
   if (existing) liveRecs.delete(existing.id);
   const rec = trace.append({
-    kind: "message",
+    // A card that carries a patch is a proposal (design doc §5): an offered
+    // mutation awaiting a decision, not just advice.
+    kind: patch ? "proposal" : "message",
     actor: actor || { kind: "rule", id: producer },
     thread: existing ? existing.thread : undefined,
     cause: existing ? [existing.id, ...(cause || [])] : cause || [],
     body: {
-      subtype: "recommendation",
+      subtype: patch ? "proposal" : "recommendation",
       producer,
       dupeKey,
       anchor: anchor || { type: "general" },
@@ -209,6 +212,7 @@ function upsertRecommendation({ producer, anchor, severity, text, actions, resol
       text,
       actions: actions || [],
       resolveOn: resolveOn || null,
+      patch: patch || undefined,
     },
   });
   liveRecs.set(rec.id, rec);
@@ -627,6 +631,97 @@ const api = {
     json(res, 200, { configPath: null, content: null, source: "none" });
   },
 
+  "POST /api/ai/fix": async (req, res) => {
+    // Generate a fix proposal for a lint issue that has no deterministic
+    // fixInfo: run the AI CLI on the snippet, return a patch proposal.
+    const body = JSON.parse((await readBody(req)).toString("utf8"));
+    const ctxPath = body.path ? resolvePath(body.path) : null;
+    const { config } = await loadEddieConfig(ctxPath);
+    const ai = { ...CONFIG_DEFAULTS.ai, ...(config.ai || {}) };
+    if (ai.chat === "never" || ai.edit === "never") {
+      return json(res, 403, { ok: false, error: "AI fixes are disabled by eddie config" });
+    }
+    if (!body.quote || !body.message) return json(res, 400, { ok: false, error: "quote and message required" });
+    const prompt = [
+      "You fix lint issues in markup documents. Your reply REPLACES the",
+      "SNIPPET below, exactly and only the snippet — the before/after context",
+      "is shown for understanding and stays in the document; never repeat it",
+      "in your reply. No explanation, no code fences, no surrounding quotes.",
+      `Lint issue (${body.rule || "unknown rule"}): ${body.message}`,
+      body.prefix ? `Context before (not yours to change): …${JSON.stringify(body.prefix)}` : "",
+      body.suffix ? `Context after (not yours to change): ${JSON.stringify(body.suffix)}…` : "",
+      "SNIPPET:",
+      body.quote,
+    ]
+      .filter(Boolean)
+      .join("\n");
+    const started = Date.now();
+    const child = spawn(ai.command, ai.args, { stdio: ["pipe", "pipe", "pipe"] });
+    let out = "";
+    let errOut = "";
+    let done = false;
+    const finish = (status, obj) => {
+      if (!done) {
+        done = true;
+        json(res, status, obj);
+      }
+    };
+    const timer = setTimeout(() => {
+      child.kill();
+      finish(504, { ok: false, error: `${ai.command} timed out after 120s` });
+    }, 120000);
+    child.stdout.on("data", (c) => (out += c));
+    child.stderr.on("data", (c) => (errOut += c));
+    child.on("error", (e) => {
+      clearTimeout(timer);
+      finish(500, { ok: false, error: `could not run '${ai.command}': ${e.message}` });
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (code !== 0) {
+        return finish(500, { ok: false, error: (errOut || out || `exited ${code}`).trim().slice(0, 1000) });
+      }
+      let replacement = out.replace(/^```[a-z]*\n?|\n?```$/g, "").replace(/\n+$/, "");
+      // Guard against the model absorbing the shown context into its reply.
+      const sfx = (body.suffix || "").trim();
+      if (sfx && replacement.trimEnd().endsWith(sfx)) {
+        replacement = replacement.trimEnd().slice(0, -sfx.length).trimEnd();
+      }
+      const pfx = (body.prefix || "").trim();
+      if (pfx && replacement.trimStart().startsWith(pfx)) {
+        replacement = replacement.trimStart().slice(pfx.length).trimStart();
+      }
+      const run = trace.append({
+        kind: "run",
+        actor: { kind: "agent", id: "ai-fix" },
+        context: ctxPath ? { doc: { path: ctxPath } } : {},
+        body: {
+          instruction: `fix ${body.rule || "lint issue"}: ${body.message}`,
+          command: ai.command,
+          durationMs: Date.now() - started,
+        },
+      });
+      const rec = upsertRecommendation({
+        producer: "ai-fix",
+        actor: { kind: "agent", id: "ai-fix" },
+        cause: [run.id],
+        anchor: { type: "doc", path: ctxPath, quote: body.quote, prefix: body.prefix, suffix: body.suffix, offset: body.offset },
+        severity: "notice",
+        text: `proposed fix for ${body.rule || "lint issue"}: ${body.message}`,
+        patch: {
+          path: ctxPath,
+          quote: body.quote,
+          prefix: body.prefix,
+          suffix: body.suffix,
+          offset: body.offset,
+          replacement,
+        },
+      });
+      finish(200, { ok: true, record: rec });
+    });
+    child.stdin.end(prompt);
+  },
+
   "POST /api/ai/chat": async (req, res) => {
     const body = JSON.parse((await readBody(req)).toString("utf8"));
     const ctxPath = body.path ? resolvePath(body.path) : null;
@@ -763,6 +858,13 @@ const api = {
   "POST /api/recommend": async (req, res) => {
     const body = JSON.parse((await readBody(req)).toString("utf8"));
     if (!body.text || !body.producer) return json(res, 400, { ok: false, error: "producer and text required" });
+    if (body.patch) {
+      const ctxPath = body.patch.path || (body.anchor && body.anchor.path);
+      const { config } = await loadEddieConfig(ctxPath ? resolvePath(ctxPath) : null);
+      if (((config.ai || {}).edit || "ask") === "never") {
+        return json(res, 403, { ok: false, error: "edit proposals are disabled by eddie config (ai.edit: never)" });
+      }
+    }
     const rec = upsertRecommendation(body);
     json(res, 200, { ok: true, record: rec });
   },

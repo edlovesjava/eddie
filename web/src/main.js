@@ -575,6 +575,7 @@ function toCmDiagnostic(view, d, source) {
     severity: d.severity || "warning",
     message: d.message,
     source: d.rule ? `${source}:${d.rule}` : source,
+    ...(d.actions ? { actions: d.actions } : {}),
   };
 }
 
@@ -648,16 +649,27 @@ registerLinter(
       }
     }
     const result = markdownlint({ strings: { doc: text }, config: cfg });
-    return result.doc.map((e) => ({
-      line: e.lineNumber,
-      column: e.errorRange ? e.errorRange[0] : 1,
-      length: e.errorRange ? e.errorRange[1] : undefined,
-      severity: "warning",
-      rule: e.ruleNames[0],
-      message:
-        `${e.ruleNames.slice(0, 2).join("/")}: ${e.ruleDescription}` +
-        (e.errorDetail ? ` [${e.errorDetail}]` : ""),
-    }));
+    return result.doc.map((e) => {
+      const d = {
+        line: e.lineNumber,
+        column: e.errorRange ? e.errorRange[0] : 1,
+        length: e.errorRange ? e.errorRange[1] : undefined,
+        severity: "warning",
+        rule: e.ruleNames[0],
+        message:
+          `${e.ruleNames.slice(0, 2).join("/")}: ${e.ruleDescription}` +
+          (e.errorDetail ? ` [${e.errorDetail}]` : ""),
+      };
+      // Every lint issue carries an eddie glyph: a deterministic fix when
+      // markdownlint provides fixInfo, an AI-proposed one otherwise. Both
+      // arrive as anchored proposals with a diff preview.
+      d.actions = [
+        e.fixInfo
+          ? { name: "✦ fix", apply: (view, from) => proposeLintFix(e, d, view, from) }
+          : { name: "✦ ask eddie", apply: (view, from) => proposeAiFix(d, view, from) },
+      ];
+      return d;
+    });
   },
   {
     configNames: [".markdownlint.json", ".markdownlint.jsonc"],
@@ -755,7 +767,12 @@ function connectEvents() {
 }
 
 function handleRecord(rec) {
-  if (rec.kind === "message" && rec.body.subtype === "recommendation") {
+  if ((rec.kind === "message" && rec.body.subtype === "recommendation") || rec.kind === "proposal") {
+    if (rec.kind === "proposal" && rec.body.patch && rec.body.patch.path === state.path && aiPolicy("edit") === "auto") {
+      liveRecs.set(rec.id, rec);
+      applyPatch(rec);
+      return;
+    }
     for (const [id, r] of liveRecs) {
       if (r.body.dupeKey === rec.body.dupeKey) {
         liveRecs.delete(id);
@@ -993,7 +1010,12 @@ function attachDocAnchor(rec) {
   docAnchorState.set(rec.id, { rec, degraded: !pos });
   if (pos) {
     state.view.dispatch({
-      effects: addAnchorEff.of({ id: rec.id, from: pos.from, to: pos.to, severity: rec.body.severity }),
+      effects: addAnchorEff.of({
+        id: rec.id,
+        from: pos.from,
+        to: pos.to,
+        severity: rec.body.patch ? "proposal" : rec.body.severity,
+      }),
     });
   }
 }
@@ -1045,6 +1067,102 @@ function showAnchorPopover(recId) {
   popoverEl.style.left = `${Math.max(8, left)}px`;
 }
 
+// ---- proposals: patches awaiting a decision ----
+
+function aiPolicy(action) {
+  return state.config?.ai?.[action] || { edit: "ask", chat: "auto" }[action] || "auto";
+}
+
+function adoptCard(rec) {
+  liveRecs.set(rec.id, rec);
+  attachDocAnchor(rec);
+  renderRecsUI();
+}
+
+// Deterministic fix from markdownlint fixInfo, offered as a proposal.
+async function proposeLintFix(e, diag, view, from) {
+  const fi = e.fixInfo;
+  const errLine = view.state.doc.lineAt(from);
+  const delta = (fi.lineNumber || e.lineNumber) - e.lineNumber;
+  const lineNo = Math.max(1, Math.min(view.state.doc.lines, errLine.number + delta));
+  const line = view.state.doc.line(lineNo);
+  let quote, replacement;
+  if (fi.deleteCount === -1) {
+    quote = line.text + (line.to < view.state.doc.length ? "\n" : "");
+    replacement = "";
+  } else {
+    const col = (fi.editColumn || 1) - 1;
+    quote = line.text;
+    replacement = line.text.slice(0, col) + (fi.insertText || "") + line.text.slice(col + (fi.deleteCount || 0));
+  }
+  const doc = view.state.doc.toString();
+  const target = {
+    path: state.path,
+    quote,
+    prefix: doc.slice(Math.max(0, line.from - 16), line.from),
+    suffix: doc.slice(line.from + quote.length, line.from + quote.length + 16),
+    offset: line.from,
+  };
+  try {
+    const r = await api("POST", "/api/recommend", {
+      producer: "lint-fix",
+      anchor: { type: "doc", ...target },
+      severity: "notice",
+      text: `fix ${diag.rule}: ${diag.message}`,
+      patch: { ...target, replacement },
+    });
+    adoptCard(r.record);
+    showAnchorPopover(r.record.id);
+  } catch (err) {
+    setStatus(`could not propose fix: ${err.message}`, true);
+  }
+}
+
+// AI-generated fix for rules without deterministic fixInfo.
+async function proposeAiFix(diag, view, from) {
+  const line = view.state.doc.lineAt(from);
+  const doc = view.state.doc.toString();
+  setStatus("✦ asking eddie for a fix…", true);
+  try {
+    const r = await api("POST", "/api/ai/fix", {
+      path: state.path,
+      quote: line.text,
+      prefix: doc.slice(Math.max(0, line.from - 80), line.from),
+      suffix: doc.slice(line.to, line.to + 80),
+      offset: line.from,
+      rule: diag.rule,
+      message: diag.message,
+    });
+    adoptCard(r.record);
+    showAnchorPopover(r.record.id);
+    setStatus("fix proposed — review the diff");
+  } catch (err) {
+    setStatus(`ask eddie failed: ${err.message}`, true);
+  }
+}
+
+async function applyPatch(rec) {
+  const p = rec.body.patch;
+  if (!p) return;
+  if (!state.view || p.path !== state.path) return setStatus("open the file to apply this fix");
+  const pos = locateAnchor(state.view.state.doc.toString(), p);
+  if (!pos) return setStatus("could not apply — the text has changed", true);
+  state.view.dispatch({ changes: { from: pos.from, to: pos.to, insert: p.replacement } });
+  const settled = await api("POST", "/api/recommend/settle", { id: rec.id, how: "applied" }).catch(() => null);
+  liveRecs.delete(rec.id);
+  detachDocAnchor(rec.id);
+  renderRecsUI();
+  api("POST", "/api/trace", {
+    kind: "action",
+    thread: rec.thread,
+    cause: [rec.id, ...(settled && settled.record ? [settled.record.id] : [])],
+    context: { doc: { path: state.path } },
+    body: { name: "patch.applied", producer: rec.body.producer },
+  }).catch(() => {});
+  relint();
+  setStatus("fix applied — save to keep it");
+}
+
 // ---- recommendations panel ----
 
 registerPanel("recs", {
@@ -1066,8 +1184,29 @@ function buildRecCard(rec, opts = {}) {
   prov.textContent = `${rec.actor.kind}:${rec.body.producer}`;
   const entry = docAnchorState.get(rec.id);
   if (entry && entry.degraded) prov.textContent += " · anchored text has changed";
+  let diff = null;
+  if (rec.body.patch) {
+    diff = document.createElement("div");
+    diff.className = "patch-diff";
+    const del = document.createElement("div");
+    del.className = "del";
+    del.textContent = rec.body.patch.quote || "(insert)";
+    const ins = document.createElement("div");
+    ins.className = "ins";
+    ins.textContent = rec.body.patch.replacement || "(delete)";
+    diff.append(del, ins);
+  }
   const actions = document.createElement("div");
   actions.className = "rec-actions";
+  if (rec.body.patch) {
+    const applyBtn = document.createElement("button");
+    applyBtn.textContent = "Apply";
+    applyBtn.onclick = () => {
+      applyPatch(rec);
+      opts.onSettle?.();
+    };
+    actions.appendChild(applyBtn);
+  }
   for (const a of rec.body.actions || []) {
     const btn = document.createElement("button");
     btn.textContent = a.label;
@@ -1110,7 +1249,9 @@ function buildRecCard(rec, opts = {}) {
     if (list) showChain(rec.id, list, renderRecsPanel);
   };
   actions.appendChild(why);
-  card.append(text, prov, actions);
+  card.append(text, prov);
+  if (diff) card.appendChild(diff);
+  card.appendChild(actions);
   return card;
 }
 
