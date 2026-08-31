@@ -94,6 +94,15 @@ prompted it.
   `severity`: `passive | notice | warn`. `resolveOn` names an event
   (e.g. `git.pushed`) that auto-resolves it. Coalesced by producer+anchor
   (doc anchors by path+quote).
+- **Proposals** (ADR-0012): add `patch: {path, quote, prefix?, suffix?,
+  offset?, replacement}` to `POST /api/recommend` and the card becomes a
+  proposal — rendered as a diff with an Apply button, governed by the
+  `ai.edit` policy (`ask` default; `never` → 403 on creation). This is how
+  an agent offers an edit instead of making one: the human decides, and the
+  applied chain (`proposal → decision → patch.applied`) is traced.
+- `POST /api/ai/fix` with `{path, quote, prefix?, suffix?, offset?, rule?,
+  message}` → runs the local AI CLI on the snippet and creates such a
+  proposal (used by the lint "✦ ask eddie" action).
 - `POST /api/recommend/settle` with `{id, how: applied|dismissed|resolved}`
 
 User feedback (👍/👎) arrives as `outcome` records whose `cause` points at
