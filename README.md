@@ -238,6 +238,11 @@ feature branches (`feat/… fix/… docs/…`) and merge to `main` after review.
 
 ## Roadmap ideas
 
+- Repetition analysis: eddie notices repetitive tasks in the trace (same
+  fix applied daily, same sequence of commands) and proposes the remedy —
+  a new slash command, an automation, or a config change
+  (design doc §9, phase 4.5)
+
 - Live-reload when a file changes on disk (agent edits appear instantly)
 - Push/pull and branch switching in the git panel
 - Formatter plugins: prettier for Markdown, shfmt for bash
