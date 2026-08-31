@@ -741,6 +741,7 @@ function togglePanel(id) {
 
 const recordHandlers = new Set();
 let liveRecs = new Map(); // id -> recommendation record
+const recFeedback = new Map(); // rec id -> "good" | "bad" (explicit 👍/👎 given)
 
 let eventSource = null; // module-level ref: guards against GC and allows reconnect
 
@@ -798,6 +799,19 @@ async function refreshRecs() {
   try {
     const { recommendations } = await api("GET", "/api/recommendations");
     liveRecs = new Map(recommendations.map((r) => [r.id, r]));
+    // Restore which cards already got explicit 👍/👎 from the trace, so the
+    // selection survives re-renders and page reloads.
+    try {
+      const { records } = await api("GET", "/api/trace?kinds=outcome&limit=200");
+      for (const o of records) {
+        if (o.body.source !== "explicit" || !o.body.valence) continue;
+        for (const c of o.cause || []) {
+          if (liveRecs.has(c) && !recFeedback.has(c)) recFeedback.set(c, o.body.valence);
+        }
+      }
+    } catch {
+      /* selection restore is best-effort */
+    }
     renderRecsUI();
     applyDocAnchors();
   } catch {
@@ -1216,14 +1230,21 @@ function buildRecCard(rec, opts = {}) {
     };
     actions.appendChild(btn);
   }
+  const chosen = recFeedback.get(rec.id);
   for (const [glyph, valence] of [["👍", "good"], ["👎", "bad"]]) {
     const fb = document.createElement("button");
-    fb.className = "fb";
+    fb.className = "fb fb-vote";
     fb.textContent = glyph;
     fb.title = `this was a ${valence} recommendation`;
+    if (chosen) {
+      fb.disabled = true;
+      if (chosen === valence) fb.classList.add("selected");
+    }
     fb.onclick = () => {
       recordOutcome(rec, valence);
-      fb.disabled = true;
+      recFeedback.set(rec.id, valence);
+      for (const b of actions.querySelectorAll(".fb-vote")) b.disabled = true;
+      fb.classList.add("selected");
       setStatus("feedback recorded");
     };
     actions.appendChild(fb);
