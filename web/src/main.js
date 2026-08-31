@@ -13,7 +13,7 @@ import { javascript } from "@codemirror/legacy-modes/mode/javascript";
 import { css as cssMode } from "@codemirror/legacy-modes/mode/css";
 import { html as htmlMode } from "@codemirror/legacy-modes/mode/xml";
 import { oneDark } from "@codemirror/theme-one-dark";
-import { linter, lintGutter, openLintPanel, closeLintPanel, forceLinting, diagnosticCount } from "@codemirror/lint";
+import { linter, lintGutter, openLintPanel, closeLintPanel, forceLinting, diagnosticCount, forEachDiagnostic } from "@codemirror/lint";
 import { jsonParseLinter } from "@codemirror/lang-json";
 import { lint as markdownlint } from "markdownlint/sync";
 import { marked } from "marked";
@@ -107,6 +107,7 @@ function createView(content) {
   const updateListener = EditorView.updateListener.of((u) => {
     if (u.docChanged) {
       setDirty(true);
+      if (popoverKind === "diag") hidePopover(); // typing dismisses the hover popover
       if (state.previewOn && state.language === "markdown") schedulePreview();
     }
     if (u.selectionSet || u.docChanged) {
@@ -135,6 +136,10 @@ function createView(content) {
         lintGutter(),
         linter(lintSource, {
           delay: 400,
+          // CM's native hover tooltip closes the instant the pointer drifts
+          // off the diagnostic — reaching its buttons is a dexterity test.
+          // We render our own sticky popover instead (see diagnostic hover).
+          tooltipFilter: () => [],
           needsRefresh: (u) => u.transactions.some((tr) => tr.effects.some((e) => e.is(relintEffect))),
         }),
         EditorView.updateListener.of((u) => updateLintStatus(u.state)),
@@ -970,6 +975,70 @@ const eddieGutter = gutter({
   markers: (view) => view.state.field(anchorGutterField),
 });
 
+// ---- diagnostic hover: a sticky popover replacing CM's fragile tooltip ----
+//
+// Opens after a short dwell over a diagnostic. Once open it STAYS — moving
+// the mouse toward its buttons can't dismiss it. It closes on click
+// elsewhere, Escape, typing, or hovering a different diagnostic.
+
+let hoverTimer = null;
+let shownDiagKey = null;
+
+function positionPopover(atPos) {
+  const coords = atPos != null && state.view ? state.view.coordsAtPos(atPos) : null;
+  const top = coords ? Math.min(coords.bottom + 8, window.innerHeight - popoverEl.offsetHeight - 12) : 80;
+  const left = coords ? Math.min(coords.left + 16, window.innerWidth - popoverEl.offsetWidth - 12) : 80;
+  popoverEl.style.top = `${Math.max(8, top)}px`;
+  popoverEl.style.left = `${Math.max(8, left)}px`;
+}
+
+function showDiagnosticPopover(items, key) {
+  hidePopover();
+  popoverKind = "diag";
+  shownDiagKey = key;
+  popoverEl = document.createElement("div");
+  popoverEl.className = "eddie-popover";
+  for (const { d, from, to } of items) {
+    const row = document.createElement("div");
+    row.className = "rec-card passive diag-row";
+    const msg = document.createElement("div");
+    msg.textContent = d.message;
+    row.appendChild(msg);
+    if (d.actions && d.actions.length) {
+      const acts = document.createElement("div");
+      acts.className = "rec-actions";
+      for (const a of d.actions) {
+        const b = document.createElement("button");
+        b.textContent = a.name;
+        b.onclick = () => a.apply(state.view, from, to);
+        acts.appendChild(b);
+      }
+      row.appendChild(acts);
+    }
+    popoverEl.appendChild(row);
+  }
+  document.body.appendChild(popoverEl);
+  positionPopover(items[0].from);
+}
+
+document.addEventListener("mousemove", (e) => {
+  if (!state.view) return;
+  if (popoverEl && popoverEl.contains(e.target)) return; // heading for a button
+  if (!e.target.closest || !e.target.closest(".cm-content")) return;
+  const pos = state.view.posAtCoords({ x: e.clientX, y: e.clientY });
+  if (pos == null) return;
+  const items = [];
+  forEachDiagnostic(state.view.state, (d, from, to) => {
+    if (from <= pos && pos <= to) items.push({ d, from, to });
+  });
+  clearTimeout(hoverTimer);
+  if (!items.length) return; // sticky: leaving a diagnostic never closes
+  const key = items.map((i) => `${i.from}-${i.to}-${i.d.message}`).join("|");
+  if (key === shownDiagKey) return;
+  if (popoverKind === "rec") return; // never steal from an open proposal/rec card
+  hoverTimer = setTimeout(() => showDiagnosticPopover(items, key), 250);
+});
+
 // One mousedown capture listener opens and closes the popover. CM swallows
 // the click event for in-text gestures (no click ever fires), so we hit-test
 // the mousedown by editor position against the anchor decorations instead of
@@ -1052,11 +1121,14 @@ function applyDocAnchors() {
 
 let popoverEl = null;
 let popoverRecId = null;
+let popoverKind = null; // "rec" | "diag"
 
 function hidePopover() {
   if (popoverEl) popoverEl.remove();
   popoverEl = null;
   popoverRecId = null;
+  popoverKind = null;
+  shownDiagKey = null;
 }
 
 function showAnchorPopover(recId) {
@@ -1064,6 +1136,7 @@ function showAnchorPopover(recId) {
   if (!entry) return;
   hidePopover();
   popoverRecId = recId;
+  popoverKind = "rec";
   popoverEl = document.createElement("div");
   popoverEl.className = "eddie-popover";
   popoverEl.appendChild(buildRecCard(entry.rec, { onSettle: hidePopover, whyInPanel: true }));
