@@ -255,6 +255,8 @@ button:hover { border-color: var(--accent); color: var(--accent); }
   padding: 8px;
 }
 .eddie-popover .rec-card { margin-bottom: 0; }
+.eddie-popover .diag-row { margin-bottom: 6px; }
+.eddie-popover .diag-row:last-child { margin-bottom: 0; }
 
 .has-badge { position: relative; }
 .rec-badge {
