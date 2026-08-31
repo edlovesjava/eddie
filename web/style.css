@@ -231,6 +231,25 @@ button:hover { border-color: var(--accent); color: var(--accent); }
   box-shadow: 0 6px 20px rgba(0, 0, 0, .2);
   max-width: 340px;
 }
+/* doc anchors: pinned recommendations in the editor */
+.eddie-anchor { background: rgba(37, 99, 235, .10); border-bottom: 1px dotted var(--accent); cursor: pointer; }
+.eddie-anchor.notice { background: rgba(37, 99, 235, .16); }
+.eddie-anchor.warn { background: rgba(220, 38, 38, .12); border-bottom-color: var(--danger); }
+.cm-eddie-gutter { width: 14px; }
+.eddie-gutter-mark { color: var(--accent); cursor: pointer; font-size: 11px; }
+.eddie-gutter-mark.warn { color: var(--danger); }
+.eddie-popover {
+  position: fixed;
+  z-index: 150;
+  width: min(360px, 90vw);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, .25);
+  padding: 8px;
+}
+.eddie-popover .rec-card { margin-bottom: 0; }
+
 .has-badge { position: relative; }
 .rec-badge {
   position: absolute;

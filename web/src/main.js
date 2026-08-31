@@ -1,7 +1,7 @@
 // Eddie editor frontend. Bundled with esbuild to /dist/app.js.
 
-import { EditorView, keymap } from "@codemirror/view";
-import { EditorState, Compartment, StateEffect, Prec } from "@codemirror/state";
+import { EditorView, keymap, gutter, GutterMarker, Decoration } from "@codemirror/view";
+import { EditorState, Compartment, StateEffect, StateField, RangeSet, Prec } from "@codemirror/state";
 import { indentWithTab } from "@codemirror/commands";
 import { basicSetup } from "codemirror";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
@@ -129,6 +129,9 @@ function createView(content) {
         langCompartment.of(languageExtension(state.language)),
         themeCompartment.of(isDark() ? oneDark : []),
         EditorView.lineWrapping,
+        anchorMarks,
+        anchorGutterField,
+        eddieGutter,
         lintGutter(),
         linter(lintSource, {
           delay: 400,
@@ -175,6 +178,7 @@ async function openFile(path) {
   createView(data.content);
   setDirty(false);
   if (!data.exists) setStatus("new file — will be created on save");
+  applyDocAnchors();
   loadConfig();
   refreshGitInfo();
   if (data.language === "markdown" && !state.previewOn) togglePreview();
@@ -202,6 +206,7 @@ async function save() {
     if (r.record) state.lastSave = { id: r.record, thread: r.thread, path: state.path };
     setDirty(false);
     setStatus(`saved ${r.bytes} bytes`);
+    applyDocAnchors(); // re-locate quotes; anchors whose text is gone degrade
     refreshGitInfo();
   } catch (e) {
     setStatus(`save failed: ${e.message}`, true);
@@ -752,14 +757,21 @@ function connectEvents() {
 function handleRecord(rec) {
   if (rec.kind === "message" && rec.body.subtype === "recommendation") {
     for (const [id, r] of liveRecs) {
-      if (r.body.dupeKey === rec.body.dupeKey) liveRecs.delete(id);
+      if (r.body.dupeKey === rec.body.dupeKey) {
+        liveRecs.delete(id);
+        detachDocAnchor(id);
+      }
     }
     liveRecs.set(rec.id, rec);
+    attachDocAnchor(rec);
     if (rec.body.severity === "warn") toast(rec.body.text);
     if (rec.body.severity !== "passive") pulseEddie();
     renderRecsUI();
   } else if (rec.cause && rec.cause.some((id) => liveRecs.has(id)) && rec.kind !== "outcome") {
-    for (const id of rec.cause) liveRecs.delete(id);
+    for (const id of rec.cause) {
+      liveRecs.delete(id);
+      detachDocAnchor(id);
+    }
     renderRecsUI();
   }
   if (isPanelOpen("history")) renderHistory();
@@ -770,6 +782,7 @@ async function refreshRecs() {
     const { recommendations } = await api("GET", "/api/recommendations");
     liveRecs = new Map(recommendations.map((r) => [r.id, r]));
     renderRecsUI();
+    applyDocAnchors();
   } catch {
     /* server may be restarting */
   }
@@ -831,6 +844,7 @@ function recordOutcome(rec, valence) {
 
 function settleRec(rec, how) {
   liveRecs.delete(rec.id);
+  detachDocAnchor(rec.id);
   renderRecsUI();
   return api("POST", "/api/recommend/settle", { id: rec.id, how }).catch(() => {});
 }
@@ -844,6 +858,193 @@ function runRecAction(rec, action) {
   settleRec(rec, "applied");
 }
 
+// ---- doc anchors: recommendations pinned to a place in the text ----
+//
+// In-session anchoring (design doc §3): a doc-anchored recommendation is
+// located by its quote (nearest match to the stored offset, disambiguated by
+// prefix/suffix), then lives in CodeMirror RangeSets, which remap positions
+// through every edit — the ✦ stays glued to the text. Anchors re-locate on
+// save; a quote that no longer exists degrades gracefully to the panel with
+// a "text changed" note. Cross-session re-anchoring is Phase 4.
+
+const addAnchorEff = StateEffect.define();
+const removeAnchorEff = StateEffect.define(); // rec id, or null = all
+
+class EddieMarker extends GutterMarker {
+  constructor(id, severity) {
+    super();
+    this.id = id;
+    this.severity = severity;
+  }
+  eq(other) {
+    return other.id === this.id && other.severity === this.severity;
+  }
+  toDOM() {
+    const s = document.createElement("span");
+    s.className = `eddie-gutter-mark ${this.severity || "passive"}`;
+    s.textContent = "✦";
+    s.dataset.rec = this.id;
+    return s;
+  }
+}
+
+const anchorMarks = StateField.define({
+  create: () => Decoration.none,
+  update(deco, tr) {
+    deco = deco.map(tr.changes);
+    for (const e of tr.effects) {
+      if (e.is(addAnchorEff)) {
+        deco = deco.update({ filter: (f, t, v) => v.spec.recId !== e.value.id });
+        if (e.value.to > e.value.from) {
+          deco = deco.update({
+            add: [
+              Decoration.mark({
+                class: `eddie-anchor ${e.value.severity || "passive"}`,
+                attributes: { "data-rec": e.value.id },
+                recId: e.value.id,
+              }).range(e.value.from, e.value.to),
+            ],
+          });
+        }
+      }
+      if (e.is(removeAnchorEff)) {
+        deco = deco.update({ filter: (f, t, v) => e.value != null && v.spec.recId !== e.value });
+      }
+    }
+    return deco;
+  },
+  provide: (f) => EditorView.decorations.from(f),
+});
+
+const anchorGutterField = StateField.define({
+  create: () => RangeSet.empty,
+  update(set, tr) {
+    set = set.map(tr.changes);
+    for (const e of tr.effects) {
+      if (e.is(addAnchorEff)) {
+        set = set.update({ filter: (f, t, v) => v.id !== e.value.id });
+        const line = tr.state.doc.lineAt(Math.min(e.value.from, tr.state.doc.length));
+        set = set.update({ add: [new EddieMarker(e.value.id, e.value.severity).range(line.from)] });
+      }
+      if (e.is(removeAnchorEff)) {
+        set = set.update({ filter: (f, t, v) => e.value != null && v.id !== e.value });
+      }
+    }
+    return set;
+  },
+});
+
+const eddieGutter = gutter({
+  class: "cm-eddie-gutter",
+  markers: (view) => view.state.field(anchorGutterField),
+});
+
+// One mousedown capture listener opens and closes the popover. CM swallows
+// the click event for in-text gestures (no click ever fires), so we hit-test
+// the mousedown by editor position against the anchor decorations instead of
+// relying on DOM classes.
+document.addEventListener(
+  "mousedown",
+  (e) => {
+    if (popoverEl && popoverEl.contains(e.target)) return; // interacting with the popover
+    const g = e.target.closest && e.target.closest(".eddie-gutter-mark");
+    let recId = (g && g.dataset.rec) || null;
+    if (!recId && state.view && e.target.closest && e.target.closest(".cm-content")) {
+      const pos = state.view.posAtCoords({ x: e.clientX, y: e.clientY });
+      if (pos != null) {
+        state.view.state.field(anchorMarks).between(pos, pos, (f, t, v) => {
+          recId = v.spec.recId;
+        });
+      }
+    }
+    if (recId) showAnchorPopover(recId);
+    else hidePopover();
+  },
+  { capture: true }
+);
+
+// Find the quote in the doc: nearest exact match to the stored offset,
+// preferring matches whose surrounding text agrees with prefix/suffix.
+function locateAnchor(docText, a) {
+  if (!a.quote) return null;
+  let best = -1;
+  let bestScore = Infinity;
+  let i = docText.indexOf(a.quote);
+  while (i !== -1) {
+    let mismatch = 0;
+    if (a.prefix && docText.slice(Math.max(0, i - a.prefix.length), i) !== a.prefix) mismatch++;
+    if (a.suffix && docText.slice(i + a.quote.length, i + a.quote.length + a.suffix.length) !== a.suffix) mismatch++;
+    const score = mismatch * 1e7 + Math.abs(i - (a.offset || 0));
+    if (score < bestScore) {
+      bestScore = score;
+      best = i;
+    }
+    i = docText.indexOf(a.quote, i + 1);
+  }
+  return best >= 0 ? { from: best, to: best + a.quote.length } : null;
+}
+
+const docAnchorState = new Map(); // rec id -> {rec, degraded}
+
+function attachDocAnchor(rec) {
+  const a = rec.body.anchor;
+  if (!state.view || !a || a.type !== "doc" || a.path !== state.path) return;
+  const pos = locateAnchor(state.view.state.doc.toString(), a);
+  docAnchorState.set(rec.id, { rec, degraded: !pos });
+  if (pos) {
+    state.view.dispatch({
+      effects: addAnchorEff.of({ id: rec.id, from: pos.from, to: pos.to, severity: rec.body.severity }),
+    });
+  }
+}
+
+function detachDocAnchor(id) {
+  if (!docAnchorState.has(id)) return;
+  docAnchorState.delete(id);
+  if (state.view) state.view.dispatch({ effects: removeAnchorEff.of(id) });
+  if (popoverRecId === id) hidePopover();
+}
+
+function applyDocAnchors() {
+  if (!state.view) return;
+  docAnchorState.clear();
+  state.view.dispatch({ effects: removeAnchorEff.of(null) });
+  for (const rec of liveRecs.values()) attachDocAnchor(rec);
+}
+
+// ---- contextual popover ----
+
+let popoverEl = null;
+let popoverRecId = null;
+
+function hidePopover() {
+  if (popoverEl) popoverEl.remove();
+  popoverEl = null;
+  popoverRecId = null;
+}
+
+function showAnchorPopover(recId) {
+  const entry = docAnchorState.get(recId) || (liveRecs.has(recId) ? { rec: liveRecs.get(recId) } : null);
+  if (!entry) return;
+  hidePopover();
+  popoverRecId = recId;
+  popoverEl = document.createElement("div");
+  popoverEl.className = "eddie-popover";
+  popoverEl.appendChild(buildRecCard(entry.rec, { onSettle: hidePopover, whyInPanel: true }));
+  document.body.appendChild(popoverEl);
+  let pos = null;
+  if (state.view) {
+    state.view.state.field(anchorGutterField).between(0, state.view.state.doc.length, (f, t, v) => {
+      if (v.id === recId) pos = f;
+    });
+  }
+  const coords = pos != null ? state.view.coordsAtPos(pos) : null;
+  const top = coords ? Math.min(coords.bottom + 8, window.innerHeight - popoverEl.offsetHeight - 12) : 80;
+  const left = coords ? Math.min(coords.left + 16, window.innerWidth - popoverEl.offsetWidth - 12) : 80;
+  popoverEl.style.top = `${Math.max(8, top)}px`;
+  popoverEl.style.left = `${Math.max(8, left)}px`;
+}
+
 // ---- recommendations panel ----
 
 registerPanel("recs", {
@@ -855,51 +1056,70 @@ registerPanel("recs", {
   onShow: () => renderRecsPanel(),
 });
 
+function buildRecCard(rec, opts = {}) {
+  const card = document.createElement("div");
+  card.className = `rec-card ${rec.body.severity}`;
+  const text = document.createElement("div");
+  text.textContent = rec.body.text;
+  const prov = document.createElement("div");
+  prov.className = "prov";
+  prov.textContent = `${rec.actor.kind}:${rec.body.producer}`;
+  const entry = docAnchorState.get(rec.id);
+  if (entry && entry.degraded) prov.textContent += " · anchored text has changed";
+  const actions = document.createElement("div");
+  actions.className = "rec-actions";
+  for (const a of rec.body.actions || []) {
+    const btn = document.createElement("button");
+    btn.textContent = a.label;
+    btn.onclick = () => {
+      runRecAction(rec, a);
+      opts.onSettle?.();
+    };
+    actions.appendChild(btn);
+  }
+  for (const [glyph, valence] of [["👍", "good"], ["👎", "bad"]]) {
+    const fb = document.createElement("button");
+    fb.className = "fb";
+    fb.textContent = glyph;
+    fb.title = `this was a ${valence} recommendation`;
+    fb.onclick = () => {
+      recordOutcome(rec, valence);
+      fb.disabled = true;
+      setStatus("feedback recorded");
+    };
+    actions.appendChild(fb);
+  }
+  const dismiss = document.createElement("button");
+  dismiss.className = "fb";
+  dismiss.textContent = "✕";
+  dismiss.title = "dismiss";
+  dismiss.onclick = () => {
+    settleRec(rec, "dismissed");
+    opts.onSettle?.();
+  };
+  actions.appendChild(dismiss);
+  const why = document.createElement("button");
+  why.className = "why";
+  why.textContent = "why?";
+  why.onclick = () => {
+    if (opts.whyInPanel) {
+      opts.onSettle?.();
+      if (!isPanelOpen("recs")) togglePanel("recs");
+    }
+    const list = $("recs-list");
+    if (list) showChain(rec.id, list, renderRecsPanel);
+  };
+  actions.appendChild(why);
+  card.append(text, prov, actions);
+  return card;
+}
+
 function renderRecsPanel() {
   const list = $("recs-list");
   if (!list) return;
   list.innerHTML = liveRecs.size ? "" : "<em>nothing right now</em>";
   for (const rec of [...liveRecs.values()].reverse()) {
-    const card = document.createElement("div");
-    card.className = `rec-card ${rec.body.severity}`;
-    const text = document.createElement("div");
-    text.textContent = rec.body.text;
-    const prov = document.createElement("div");
-    prov.className = "prov";
-    prov.textContent = `${rec.actor.kind}:${rec.body.producer}`;
-    const actions = document.createElement("div");
-    actions.className = "rec-actions";
-    for (const a of rec.body.actions || []) {
-      const btn = document.createElement("button");
-      btn.textContent = a.label;
-      btn.onclick = () => runRecAction(rec, a);
-      actions.appendChild(btn);
-    }
-    for (const [glyph, valence] of [["👍", "good"], ["👎", "bad"]]) {
-      const fb = document.createElement("button");
-      fb.className = "fb";
-      fb.textContent = glyph;
-      fb.title = `this was a ${valence} recommendation`;
-      fb.onclick = () => {
-        recordOutcome(rec, valence);
-        fb.disabled = true;
-        setStatus("feedback recorded");
-      };
-      actions.appendChild(fb);
-    }
-    const dismiss = document.createElement("button");
-    dismiss.className = "fb";
-    dismiss.textContent = "✕";
-    dismiss.title = "dismiss";
-    dismiss.onclick = () => settleRec(rec, "dismissed");
-    actions.appendChild(dismiss);
-    const why = document.createElement("button");
-    why.className = "why";
-    why.textContent = "why?";
-    why.onclick = () => showChain(rec.id, list, renderRecsPanel);
-    actions.appendChild(why);
-    card.append(text, prov, actions);
-    list.appendChild(card);
+    list.appendChild(buildRecCard(rec));
   }
 }
 
@@ -1371,7 +1591,8 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     $("palette").hidden ? openPalette() : closePalette();
   } else if (e.key === "Escape") {
-    if (!$("linkpick").hidden) closePick(null);
+    if (popoverEl) hidePopover();
+    else if (!$("linkpick").hidden) closePick(null);
     else if (!$("palette").hidden) closePalette();
   }
 });

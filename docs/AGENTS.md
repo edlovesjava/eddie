@@ -83,9 +83,17 @@ prompted it.
 - `GET /api/recommendations` → live (unsettled) recommendations
 - `POST /api/recommend` with `{producer, text, anchor?, severity?, actions?,
   resolveOn?}` → surface a recommendation to the user. Anchors:
-  `{type: "general"}`, `{type: "ui", target: "panel:git|element:<id>"}`.
+  `{type: "general"}`, `{type: "ui", target: "panel:git|element:<id>"}`, or
+  `{type: "doc", path, quote, prefix?, suffix?, offset?}` — **pinned to a
+  place in the text**. Doc anchors are content-addressed (ADR-0011): quote
+  the exact text you're commenting on, plus ~16 chars of prefix/suffix
+  context and the offset where you saw it; eddie locates it in the live
+  document (gutter ✦ + highlight, in-context popover), tracks it through
+  edits, and degrades gracefully if the text is gone — so you can safely
+  annotate a document that changed since you read it.
   `severity`: `passive | notice | warn`. `resolveOn` names an event
-  (e.g. `git.pushed`) that auto-resolves it. Coalesced by producer+anchor.
+  (e.g. `git.pushed`) that auto-resolves it. Coalesced by producer+anchor
+  (doc anchors by path+quote).
 - `POST /api/recommend/settle` with `{id, how: applied|dismissed|resolved}`
 
 User feedback (👍/👎) arrives as `outcome` records whose `cause` points at

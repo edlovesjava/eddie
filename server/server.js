@@ -181,8 +181,17 @@ function sha(text) {
 // producer+anchor so a producer updates its card instead of stacking.
 const liveRecs = new Map(); // id -> record
 
+// Coalescing identity for an anchor: doc anchors are identified by what they
+// point at (path+quote), not where — offsets shift as the doc is edited and
+// must not fork a new card.
+function anchorKey(anchor) {
+  const a = anchor || { type: "general" };
+  if (a.type === "doc") return JSON.stringify({ type: "doc", path: a.path, quote: a.quote });
+  return JSON.stringify(a);
+}
+
 function upsertRecommendation({ producer, anchor, severity, text, actions, resolveOn, cause, actor }) {
-  const dupeKey = `${producer}|${JSON.stringify(anchor || { type: "general" })}`;
+  const dupeKey = `${producer}|${anchorKey(anchor)}`;
   const existing = [...liveRecs.values()].find((r) => r.body.dupeKey === dupeKey);
   if (existing && existing.body.text === text) return existing;
   if (existing) liveRecs.delete(existing.id);
@@ -763,7 +772,7 @@ const api = {
     const body = JSON.parse((await readBody(req)).toString("utf8"));
     let id = body.id;
     if (!id && body.producer) {
-      const dupeKey = `${body.producer}|${JSON.stringify(body.anchor || { type: "general" })}`;
+      const dupeKey = `${body.producer}|${anchorKey(body.anchor)}`;
       const match = [...liveRecs.values()].find((r) => r.body.dupeKey === dupeKey);
       id = match && match.id;
     }

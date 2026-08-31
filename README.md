@@ -134,7 +134,14 @@ aren't in git.
 **Recommendations** ride on it: rule producers (e.g. unpushed commits, a
 lint pile-up) surface cards anchored to the relevant UI — a badge appears on
 the feature, the **✦** icon in the status bar shows the count (click it for
-the panel), and `warn`-level items toast. Cards offer actions, dismiss, and
+the panel), and `warn`-level items toast. Recommendations can also be
+**pinned to a place in the text**: a ✦ appears in the gutter and the passage
+is subtly highlighted; click either for an in-context popover with the
+recommendation and its actions. Anchors track the text as you edit (they're
+located by content, not line numbers) and degrade gracefully to the panel if
+the passage is deleted. The built-in **link checker** demonstrates it: save
+a markdown file with a broken relative link and the warning pins to the link
+itself, resolving the moment you fix it. Cards offer actions, dismiss, and
 **👍/👎 feedback** — judgments are recorded as outcomes so Eddie can learn
 what's welcome (the learning loop in the design doc). Recommendations
 auto-resolve when their condition clears (push your commits and the
