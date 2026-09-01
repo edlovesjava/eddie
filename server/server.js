@@ -219,6 +219,89 @@ function upsertRecommendation({ producer, anchor, severity, text, actions, resol
   return rec;
 }
 
+// Shared runner for AI edit endpoints (/api/ai/fix, /api/ai/transform):
+// spawn the CLI, clean the reply (fence stripping + context-leak guards),
+// reject no-op/NO-FIX replies, then record the run and upsert a proposal.
+// `target` carries {path?, quote, prefix?, suffix?, offset?}.
+function runAiEdit({ res, ai, prompt, ctxPath, target, producer, instruction, cardText, noFixError, timeoutMs = 120000 }) {
+  const started = Date.now();
+  const child = spawn(ai.command, ai.args, { stdio: ["pipe", "pipe", "pipe"] });
+  let out = "";
+  let errOut = "";
+  let done = false;
+  const finish = (status, obj) => {
+    if (!done) {
+      done = true;
+      json(res, status, obj);
+    }
+  };
+  const recordRun = (result) =>
+    trace.append({
+      kind: "run",
+      actor: { kind: "agent", id: producer },
+      context: ctxPath ? { doc: { path: ctxPath } } : {},
+      body: { instruction, command: ai.command, durationMs: Date.now() - started, ...(result ? { result } : {}) },
+    });
+  const timer = setTimeout(() => {
+    child.kill();
+    finish(504, { ok: false, error: `${ai.command} timed out after ${Math.round(timeoutMs / 1000)}s` });
+  }, timeoutMs);
+  child.stdout.on("data", (c) => (out += c));
+  child.stderr.on("data", (c) => (errOut += c));
+  child.on("error", (e) => {
+    clearTimeout(timer);
+    finish(500, { ok: false, error: `could not run '${ai.command}': ${e.message}` });
+  });
+  child.on("close", (code) => {
+    clearTimeout(timer);
+    if (code !== 0) {
+      return finish(500, { ok: false, error: (errOut || out || `exited ${code}`).trim().slice(0, 1000) });
+    }
+    let replacement = out.replace(/^```[a-z]*\n?|\n?```$/g, "").replace(/\n+$/, "");
+    // Guard against the model absorbing the shown context into its reply.
+    const sfx = (target.suffix || "").trim();
+    if (sfx && replacement.trimEnd().endsWith(sfx)) {
+      replacement = replacement.trimEnd().slice(0, -sfx.length).trimEnd();
+    }
+    const pfx = (target.prefix || "").trim();
+    if (pfx && replacement.trimStart().startsWith(pfx)) {
+      replacement = replacement.trimStart().slice(pfx.length).trimStart();
+    }
+    // A no-op "fix" is worse than none: never offer a card whose diff
+    // changes nothing, or an empty/declined reply.
+    if (!replacement.trim() || replacement.trim() === "NO-FIX" || replacement === target.quote) {
+      recordRun("no-fix");
+      return finish(200, { ok: false, noFix: true, error: noFixError });
+    }
+    const run = recordRun();
+    const rec = upsertRecommendation({
+      producer,
+      actor: { kind: "agent", id: producer },
+      cause: [run.id],
+      anchor: {
+        type: "doc",
+        path: ctxPath,
+        quote: target.quote,
+        prefix: target.prefix,
+        suffix: target.suffix,
+        offset: target.offset,
+      },
+      severity: "notice",
+      text: cardText,
+      patch: {
+        path: ctxPath,
+        quote: target.quote,
+        prefix: target.prefix,
+        suffix: target.suffix,
+        offset: target.offset,
+        replacement,
+      },
+    });
+    finish(200, { ok: true, record: rec });
+  });
+  child.stdin.end(prompt);
+}
+
 function settleRecommendation(id, how, actor, note) {
   const rec = liveRecs.get(id);
   if (!rec) return null;
@@ -665,91 +748,65 @@ const api = {
     ]
       .filter(Boolean)
       .join("\n");
-    const started = Date.now();
-    const child = spawn(ai.command, ai.args, { stdio: ["pipe", "pipe", "pipe"] });
-    let out = "";
-    let errOut = "";
-    let done = false;
-    const finish = (status, obj) => {
-      if (!done) {
-        done = true;
-        json(res, status, obj);
-      }
-    };
-    const timer = setTimeout(() => {
-      child.kill();
-      finish(504, { ok: false, error: `${ai.command} timed out after 120s` });
-    }, 120000);
-    child.stdout.on("data", (c) => (out += c));
-    child.stderr.on("data", (c) => (errOut += c));
-    child.on("error", (e) => {
-      clearTimeout(timer);
-      finish(500, { ok: false, error: `could not run '${ai.command}': ${e.message}` });
+    runAiEdit({
+      res,
+      ai,
+      prompt,
+      ctxPath,
+      target: body,
+      producer: "ai-fix",
+      instruction: `fix ${body.rule || "lint issue"}: ${body.message}`,
+      cardText: `proposed fix for ${body.rule || "lint issue"}: ${body.message}`,
+      noFixError: `eddie couldn't produce a fix for ${body.rule || "this issue"} — it may need document-level changes`,
     });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      if (code !== 0) {
-        return finish(500, { ok: false, error: (errOut || out || `exited ${code}`).trim().slice(0, 1000) });
-      }
-      let replacement = out.replace(/^```[a-z]*\n?|\n?```$/g, "").replace(/\n+$/, "");
-      // Guard against the model absorbing the shown context into its reply.
-      const sfx = (body.suffix || "").trim();
-      if (sfx && replacement.trimEnd().endsWith(sfx)) {
-        replacement = replacement.trimEnd().slice(0, -sfx.length).trimEnd();
-      }
-      const pfx = (body.prefix || "").trim();
-      if (pfx && replacement.trimStart().startsWith(pfx)) {
-        replacement = replacement.trimStart().slice(pfx.length).trimStart();
-      }
-      // A no-op "fix" is worse than none: never offer a card whose diff
-      // changes nothing (the MD051 echo bug), or an empty/declined reply.
-      if (!replacement.trim() || replacement.trim() === "NO-FIX" || replacement === body.quote) {
-        trace.append({
-          kind: "run",
-          actor: { kind: "agent", id: "ai-fix" },
-          context: ctxPath ? { doc: { path: ctxPath } } : {},
-          body: {
-            instruction: `fix ${body.rule || "lint issue"}: ${body.message}`,
-            command: ai.command,
-            durationMs: Date.now() - started,
-            result: "no-fix",
-          },
-        });
-        return finish(200, {
-          ok: false,
-          noFix: true,
-          error: `eddie couldn't produce a fix for ${body.rule || "this issue"} — it may need document-level changes`,
-        });
-      }
-      const run = trace.append({
-        kind: "run",
-        actor: { kind: "agent", id: "ai-fix" },
-        context: ctxPath ? { doc: { path: ctxPath } } : {},
-        body: {
-          instruction: `fix ${body.rule || "lint issue"}: ${body.message}`,
-          command: ai.command,
-          durationMs: Date.now() - started,
-        },
-      });
-      const rec = upsertRecommendation({
-        producer: "ai-fix",
-        actor: { kind: "agent", id: "ai-fix" },
-        cause: [run.id],
-        anchor: { type: "doc", path: ctxPath, quote: body.quote, prefix: body.prefix, suffix: body.suffix, offset: body.offset },
-        severity: "notice",
-        text: `proposed fix for ${body.rule || "lint issue"}: ${body.message}`,
-        patch: {
-          path: ctxPath,
-          quote: body.quote,
-          prefix: body.prefix,
-          suffix: body.suffix,
-          offset: body.offset,
-          replacement,
-        },
-      });
-      finish(200, { ok: true, record: rec });
+  },
+
+  "POST /api/ai/transform": async (req, res) => {
+    // /ai inline: apply the user's request to the target text (their
+    // selection or current paragraph); the result is a patch proposal.
+    const body = JSON.parse((await readBody(req)).toString("utf8"));
+    const ctxPath = body.path ? resolvePath(body.path) : null;
+    const { config } = await loadEddieConfig(ctxPath);
+    const ai = { ...CONFIG_DEFAULTS.ai, ...(config.ai || {}) };
+    if (ai.chat === "never" || ai.edit === "never") {
+      return json(res, 403, { ok: false, error: "AI edits are disabled by eddie config" });
+    }
+    if (!body.quote || !body.ask) return json(res, 400, { ok: false, error: "quote and ask required" });
+    const prompt = [
+      "You edit markup documents per the user's request. Your reply REPLACES",
+      "the TARGET text below, exactly and only the target — the before/after",
+      "context is shown for understanding and stays in the document; never",
+      "repeat it in your reply. No explanation, no code fences, no",
+      "surrounding quotes. Preserve formatting conventions (markers,",
+      "indentation, heading levels) unless the request changes them.",
+      "If the request is a question or cannot be carried out as an edit to",
+      "the target text, reply with exactly: NO-FIX",
+      `USER REQUEST: ${body.ask}`,
+      Array.isArray(body.outline) && body.outline.length
+        ? `Document headings (for reference):\n${body.outline
+            .slice(0, 80)
+            .map((h) => `  ${h}`)
+            .join("\n")}`
+        : "",
+      body.prefix ? `Context before (not yours to change): …${JSON.stringify(body.prefix)}` : "",
+      body.suffix ? `Context after (not yours to change): ${JSON.stringify(body.suffix)}…` : "",
+      "TARGET:",
+      body.quote,
+    ]
+      .filter(Boolean)
+      .join("\n");
+    runAiEdit({
+      res,
+      ai,
+      prompt,
+      ctxPath,
+      target: body,
+      producer: "ai-inline",
+      instruction: `/ai ${body.ask}`,
+      cardText: `/ai ${body.ask}`,
+      noFixError: "eddie couldn't do that as a text edit — try asking in Chat instead",
+      timeoutMs: 180000,
     });
-    child.stdin.end(prompt);
   },
 
   "POST /api/ai/chat": async (req, res) => {
