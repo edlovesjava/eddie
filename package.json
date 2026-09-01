@@ -1,6 +1,6 @@
 {
   "name": "eddie-editor",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Eddie — a fast, personal, browser-based editor for markup files (Markdown, JSON, bash), with git built in and an agent-friendly API.",
   "license": "MIT",
   "author": "Ed Wentworth",

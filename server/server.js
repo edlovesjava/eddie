@@ -114,6 +114,9 @@ const CONFIG_DEFAULTS = {
     command: "claude", // CLI that answers chat prompts (prompt on stdin)
     args: ["-p"],
   },
+  lint: {
+    gutter: "on", // quiet per-line ⚠ gutter marks: on | off (squiggles only)
+  },
 };
 
 function parseJsonc(text) {
