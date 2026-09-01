@@ -1205,10 +1205,29 @@ async function proposeLintFix(e, diag, view, from) {
   }
 }
 
+// GitHub-style slug for a heading, so fragment fixes (MD051) are solvable.
+function slugify(heading) {
+  return heading
+    .toLowerCase()
+    .replace(/[`*_~[\]()]/g, "")
+    .replace(/[^\w\s-]/g, "")
+    .trim()
+    .replace(/\s+/g, "-");
+}
+
 // AI-generated fix for rules without deterministic fixInfo.
 async function proposeAiFix(diag, view, from) {
   const line = view.state.doc.lineAt(from);
   const doc = view.state.doc.toString();
+  // Heading outline gives the model the document facts some rules need —
+  // e.g. MD051 (valid link fragments) is unfixable from the snippet alone.
+  const outline =
+    state.language === "markdown"
+      ? (doc.match(/^#{1,6}\s+.+$/gm) || []).slice(0, 60).map((h) => {
+          const text = h.replace(/^#{1,6}\s+/, "");
+          return `#${slugify(text)}  (${text})`;
+        })
+      : [];
   setStatus("✦ asking eddie for a fix…", true);
   try {
     const r = await api("POST", "/api/ai/fix", {
@@ -1219,7 +1238,12 @@ async function proposeAiFix(diag, view, from) {
       offset: line.from,
       rule: diag.rule,
       message: diag.message,
+      outline,
     });
+    if (!r.record) {
+      setStatus(r.error || "eddie couldn't produce a fix for this issue", true);
+      return;
+    }
     adoptCard(r.record);
     showAnchorPopover(r.record.id);
     setStatus("fix proposed — review the diff");

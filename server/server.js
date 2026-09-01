@@ -647,7 +647,17 @@ const api = {
       "SNIPPET below, exactly and only the snippet — the before/after context",
       "is shown for understanding and stays in the document; never repeat it",
       "in your reply. No explanation, no code fences, no surrounding quotes.",
+      "Preserve everything in the snippet that is not part of the fix —",
+      "including list markers, numbering, indentation, and punctuation.",
+      "If the issue genuinely cannot be fixed from the information given,",
+      "reply with exactly: NO-FIX",
       `Lint issue (${body.rule || "unknown rule"}): ${body.message}`,
+      Array.isArray(body.outline) && body.outline.length
+        ? `Document headings (the valid link fragments in this document):\n${body.outline
+            .slice(0, 80)
+            .map((h) => `  ${h}`)
+            .join("\n")}`
+        : "",
       body.prefix ? `Context before (not yours to change): …${JSON.stringify(body.prefix)}` : "",
       body.suffix ? `Context after (not yours to change): ${JSON.stringify(body.suffix)}…` : "",
       "SNIPPET:",
@@ -690,6 +700,26 @@ const api = {
       const pfx = (body.prefix || "").trim();
       if (pfx && replacement.trimStart().startsWith(pfx)) {
         replacement = replacement.trimStart().slice(pfx.length).trimStart();
+      }
+      // A no-op "fix" is worse than none: never offer a card whose diff
+      // changes nothing (the MD051 echo bug), or an empty/declined reply.
+      if (!replacement.trim() || replacement.trim() === "NO-FIX" || replacement === body.quote) {
+        trace.append({
+          kind: "run",
+          actor: { kind: "agent", id: "ai-fix" },
+          context: ctxPath ? { doc: { path: ctxPath } } : {},
+          body: {
+            instruction: `fix ${body.rule || "lint issue"}: ${body.message}`,
+            command: ai.command,
+            durationMs: Date.now() - started,
+            result: "no-fix",
+          },
+        });
+        return finish(200, {
+          ok: false,
+          noFix: true,
+          error: `eddie couldn't produce a fix for ${body.rule || "this issue"} — it may need document-level changes`,
+        });
       }
       const run = trace.append({
         kind: "run",
