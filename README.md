@@ -70,7 +70,9 @@ In the editor:
   `"lint": {"gutter": "off"}` in `/settings`. Other
   languages plug in via `eddie.registerLinter`. Every markdown lint issue
   carries an eddie glyph: **✦ fix** (a deterministic fix from markdownlint)
-  or **✦ ask eddie** (your local `claude` CLI drafts one). Either way you
+  or **✦ ask eddie** (your local `claude` CLI drafts one — while it works,
+  a thought bubble with a pulsing ✦ pins to the line so you can see eddie
+  thinking). Either way you
   get a **proposal** pinned to the line — a red/green diff in a popover with
   **Apply**, 👍/👎, and dismiss. Nothing touches your text until you apply
   (set `"ai": {"edit": "auto"}` to auto-apply, or `"never"` to disable
@@ -102,7 +104,8 @@ In the editor:
   concise` + Enter targets your **selection** (use the palette to keep one)
   or, typed inline, the **paragraph at the cursor**. The result is a
   proposal pinned to that text — red/green diff, Apply, 👍/👎 — never a
-  direct edit (same `ai.edit` policy as lint fixes). Question-shaped asks
+  direct edit (same `ai.edit` policy as lint fixes). The same ✦ thought
+  bubble marks the target while eddie works. Question-shaped asks
   are declined with a pointer to Chat; edits trace the full
   run → proposal → decision → applied chain
 

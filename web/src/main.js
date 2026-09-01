@@ -538,6 +538,7 @@ registerCommand("ai", {
     const doc = es.doc.toString();
     const quote = doc.slice(range.from, range.to);
     setStatus(`✦ /ai ${args.slice(0, 50)}…`, true);
+    const thinking = showThinking(range.from);
     try {
       const r = await api("POST", "/api/ai/transform", {
         path: state.path,
@@ -548,11 +549,13 @@ registerCommand("ai", {
         offset: range.from,
         outline: buildOutline(doc),
       });
+      hideThinking(thinking);
       if (!r.record) return setStatus(r.error || "eddie couldn't do that as an edit", true);
       adoptCard(r.record);
       showAnchorPopover(r.record.id);
       setStatus("proposal ready — review the diff");
     } catch (e) {
+      hideThinking(thinking);
       setStatus(`/ai failed: ${e.message}`, true);
     }
   },
@@ -1265,6 +1268,62 @@ function hidePopover() {
   popoverPinned = false;
 }
 
+// ---- thinking indicator ----
+//
+// While an AI edit is in flight (✦ ask eddie, /ai) a small thought bubble
+// pins to the target text: a pulsing ✦ plus "eddie is thinking…". It is
+// replaced by the proposal popover when the answer lands. Each request gets
+// a token so a slow reply can't tear down a newer request's bubble.
+
+let thinkingEl = null;
+let thinkingToken = 0;
+let thinkingScrollTarget = null;
+
+function showThinking(atPos) {
+  hideThinking(thinkingToken);
+  const token = ++thinkingToken;
+  thinkingEl = document.createElement("div");
+  thinkingEl.className = "eddie-thinking";
+  const spark = document.createElement("span");
+  spark.className = "spark";
+  spark.textContent = "✦";
+  thinkingEl.append(spark, " eddie is thinking");
+  const dots = document.createElement("span");
+  dots.className = "dots";
+  for (let i = 0; i < 3; i++) {
+    const d = document.createElement("span");
+    d.textContent = ".";
+    dots.appendChild(d);
+  }
+  thinkingEl.appendChild(dots);
+  document.body.appendChild(thinkingEl);
+  const place = () => {
+    if (!thinkingEl) return;
+    const coords = atPos != null && state.view ? state.view.coordsAtPos(Math.min(atPos, state.view.state.doc.length)) : null;
+    const top = coords ? Math.min(coords.bottom + 6, window.innerHeight - 40) : 80;
+    const left = coords ? Math.min(coords.left + 16, window.innerWidth - thinkingEl.offsetWidth - 12) : 80;
+    thinkingEl.style.top = `${Math.max(8, top)}px`;
+    thinkingEl.style.left = `${Math.max(8, left)}px`;
+  };
+  place();
+  if (state.view) {
+    thinkingScrollTarget = state.view.scrollDOM;
+    thinkingScrollTarget.addEventListener("scroll", place);
+    thinkingEl._place = place;
+  }
+  return token;
+}
+
+function hideThinking(token) {
+  if (token !== thinkingToken || !thinkingEl) return;
+  if (thinkingScrollTarget && thinkingEl._place) {
+    thinkingScrollTarget.removeEventListener("scroll", thinkingEl._place);
+    thinkingScrollTarget = null;
+  }
+  thinkingEl.remove();
+  thinkingEl = null;
+}
+
 function showAnchorPopover(recId) {
   const entry = docAnchorState.get(recId) || (liveRecs.has(recId) ? { rec: liveRecs.get(recId) } : null);
   if (!entry) return;
@@ -1365,6 +1424,8 @@ async function proposeAiFix(diag, view, from) {
   const doc = view.state.doc.toString();
   const outline = buildOutline(doc);
   setStatus("✦ asking eddie for a fix…", true);
+  hidePopover(); // the diag popover's job is done; the bubble takes over
+  const thinking = showThinking(from);
   try {
     const r = await api("POST", "/api/ai/fix", {
       path: state.path,
@@ -1376,6 +1437,7 @@ async function proposeAiFix(diag, view, from) {
       message: diag.message,
       outline,
     });
+    hideThinking(thinking);
     if (!r.record) {
       setStatus(r.error || "eddie couldn't produce a fix for this issue", true);
       return;
@@ -1384,6 +1446,7 @@ async function proposeAiFix(diag, view, from) {
     showAnchorPopover(r.record.id);
     setStatus("fix proposed — review the diff");
   } catch (err) {
+    hideThinking(thinking);
     setStatus(`ask eddie failed: ${err.message}`, true);
   }
 }
