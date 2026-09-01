@@ -244,6 +244,19 @@ button:hover { border-color: var(--accent); color: var(--accent); }
 .cm-eddie-gutter { width: 14px; }
 .eddie-gutter-mark { color: var(--accent); cursor: pointer; font-size: 11px; }
 .eddie-gutter-mark.warn { color: var(--danger); }
+/* Quiet lint marks: dim, small — enough to catch a scanning eye while the
+   ✦ anchors stay loud. Click for the line's issues in the sticky popover. */
+.eddie-lint-mark { cursor: pointer; font-size: 9px; opacity: .55; color: var(--muted); }
+.eddie-lint-mark:hover { opacity: 1; }
+.eddie-lint-mark.error { color: var(--danger); }
+.eddie-lint-mark.warning { color: #d97706; }
+@media (prefers-color-scheme: dark) { .eddie-lint-mark.warning { color: #fbbf24; } }
+.eddie-lint-mark sup { font-size: 7px; opacity: .9; }
+/* A ✦ anchor owns its 14px cell (it usually IS the fix for the lint issue);
+   the squiggle still marks the issue in the text. */
+.cm-gutterElement:has(.eddie-gutter-mark) .eddie-lint-mark { display: none; }
+/* Preference: {"lint": {"gutter": "off"}} -> squiggles only */
+body.lint-gutter-off .eddie-lint-mark { display: none; }
 .eddie-popover {
   position: fixed;
   z-index: 150;

@@ -61,8 +61,13 @@ In the editor:
 - **Format** pretty-prints the document (JSON built in; add formatters for
   other languages via plugins)
 - **Lint** runs as you type: [markdownlint](https://github.com/DavidAnson/markdownlint)
-  for Markdown and syntax checking for JSON, with squiggles, gutter markers, a
-  ⚠ count in the status bar, and a diagnostics panel (**Lint** button). Other
+  for Markdown and syntax checking for JSON, with squiggles, a ⚠ count in the
+  status bar, and a diagnostics panel (**Lint** button). A **quiet ⚠ in the
+  gutter** marks each line with issues (a tiny count when there's more than
+  one) — easy to spot when scanning, dim enough to ignore. Click it for the
+  same sticky popover the squiggle shows, listing every issue on the line
+  with its fix actions; prefer squiggles only with
+  `"lint": {"gutter": "off"}` in `/settings`. Other
   languages plug in via `eddie.registerLinter`. Every markdown lint issue
   carries an eddie glyph: **✦ fix** (a deterministic fix from markdownlint)
   or **✦ ask eddie** (your local `claude` CLI drafts one). Either way you
@@ -180,6 +185,9 @@ first use:
   the button is already explicit.
 - `pullStrategy`: `rebase` (linear history, with autostash), `merge`, or
   `ff-only` (refuse to pull when histories diverge).
+- The config also holds display preferences: `"lint": {"gutter": "on"}`
+  (default) shows the quiet per-line ⚠ lint marks in the gutter; `"off"`
+  keeps squiggles only.
 - A `.eddie.json` in a repo (found walking up from the file, like lint
   configs) overrides the global config per project — e.g. put
   `{"git": {"push": "never"}}` in a repo you never want pushed from Eddie.

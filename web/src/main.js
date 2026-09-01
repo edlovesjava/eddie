@@ -13,7 +13,7 @@ import { javascript } from "@codemirror/legacy-modes/mode/javascript";
 import { css as cssMode } from "@codemirror/legacy-modes/mode/css";
 import { html as htmlMode } from "@codemirror/legacy-modes/mode/xml";
 import { oneDark } from "@codemirror/theme-one-dark";
-import { linter, lintGutter, openLintPanel, closeLintPanel, forceLinting, diagnosticCount, forEachDiagnostic } from "@codemirror/lint";
+import { linter, openLintPanel, closeLintPanel, forceLinting, diagnosticCount, forEachDiagnostic, setDiagnosticsEffect } from "@codemirror/lint";
 import { jsonParseLinter } from "@codemirror/lang-json";
 import { lint as markdownlint } from "markdownlint/sync";
 import { marked } from "marked";
@@ -46,6 +46,9 @@ async function loadConfig() {
   } catch {
     state.config = null;
   }
+  // Display preference, not a policy: hide the quiet gutter lint marks when
+  // {"lint": {"gutter": "off"}}. Applies on tab refocus like other config.
+  document.body.classList.toggle("lint-gutter-off", state.config?.lint?.gutter === "off");
 }
 
 const langCompartment = new Compartment();
@@ -132,10 +135,8 @@ function createView(content) {
         EditorView.lineWrapping,
         anchorMarks,
         anchorGutterField,
+        lintLineField,
         eddieGutter,
-        // No lintGutter(): its ⚠ markers duplicated the squiggle on the same
-        // line and carried CM's fragile quick-closing hover popup. Squiggles
-        // + the sticky popover + the ⚠ count + the Lint panel cover it.
         linter(lintSource, {
           delay: 400,
           // CM's native hover tooltip closes the instant the pointer drifts
@@ -972,9 +973,65 @@ const anchorGutterField = StateField.define({
   },
 });
 
+// Quiet lint marks share the ✦ gutter column: one dim ⚠ per line with
+// diagnostics (worst severity wins, tiny count when >1) — just enough to
+// catch a scanning eye; the squiggle carries the in-text context. Clicking
+// opens the SAME sticky popover the squiggle hover uses, listing every
+// issue on the line. Not CM's lintGutter(), whose separate fragile hover
+// tooltip is why it was removed. Toggle: {"lint": {"gutter": "off"}}.
+const SEV_RANK = { error: 3, warning: 2, info: 1, hint: 0 };
+
+class LintLineMarker extends GutterMarker {
+  constructor(severity, count) {
+    super();
+    this.severity = severity;
+    this.count = count;
+  }
+  eq(other) {
+    return other.severity === this.severity && other.count === this.count;
+  }
+  toDOM() {
+    const s = document.createElement("span");
+    s.className = `eddie-lint-mark ${this.severity || "info"}`;
+    s.textContent = "⚠";
+    if (this.count > 1) {
+      const n = document.createElement("sup");
+      n.textContent = this.count;
+      s.appendChild(n);
+    }
+    s.title = this.count > 1 ? `${this.count} lint issues` : "1 lint issue";
+    return s;
+  }
+}
+
+const lintLineField = StateField.define({
+  create: () => RangeSet.empty,
+  update(set, tr) {
+    set = set.map(tr.changes);
+    for (const e of tr.effects) {
+      if (!e.is(setDiagnosticsEffect)) continue;
+      const byLine = new Map(); // line start -> {severity, count}
+      for (const d of e.value) {
+        const line = tr.state.doc.lineAt(Math.min(d.from, tr.state.doc.length));
+        const cur = byLine.get(line.from);
+        if (!cur) byLine.set(line.from, { severity: d.severity, count: 1 });
+        else {
+          cur.count++;
+          if ((SEV_RANK[d.severity] || 0) > (SEV_RANK[cur.severity] || 0)) cur.severity = d.severity;
+        }
+      }
+      set = RangeSet.of(
+        [...byLine.entries()].map(([from, m]) => new LintLineMarker(m.severity, m.count).range(from)),
+        true
+      );
+    }
+    return set;
+  },
+});
+
 const eddieGutter = gutter({
   class: "cm-eddie-gutter",
-  markers: (view) => view.state.field(anchorGutterField),
+  markers: (view) => [view.state.field(anchorGutterField), view.state.field(lintLineField)],
 });
 
 // ---- diagnostic hover: a sticky popover replacing CM's fragile tooltip ----
@@ -985,6 +1042,7 @@ const eddieGutter = gutter({
 
 let hoverTimer = null;
 let shownDiagKey = null;
+let popoverPinned = false; // opened by a gutter click: hover may not replace it
 
 function positionPopover(atPos) {
   const coords = atPos != null && state.view ? state.view.coordsAtPos(atPos) : null;
@@ -994,10 +1052,11 @@ function positionPopover(atPos) {
   popoverEl.style.left = `${Math.max(8, left)}px`;
 }
 
-function showDiagnosticPopover(items, key) {
+function showDiagnosticPopover(items, key, opts = {}) {
   hidePopover();
   popoverKind = "diag";
   shownDiagKey = key;
+  popoverPinned = !!opts.pinned;
   popoverEl = document.createElement("div");
   popoverEl.className = "eddie-popover";
   for (const { d, from, to } of items) {
@@ -1038,6 +1097,7 @@ document.addEventListener("mousemove", (e) => {
   const key = items.map((i) => `${i.from}-${i.to}-${i.d.message}`).join("|");
   if (key === shownDiagKey) return;
   if (popoverKind === "rec") return; // never steal from an open proposal/rec card
+  if (popoverPinned) return; // ditto a gutter-clicked line summary
   hoverTimer = setTimeout(() => showDiagnosticPopover(items, key), 250);
 });
 
@@ -1049,6 +1109,23 @@ document.addEventListener(
   "mousedown",
   (e) => {
     if (popoverEl && popoverEl.contains(e.target)) return; // interacting with the popover
+    const lm = e.target.closest && e.target.closest(".eddie-lint-mark");
+    if (lm && state.view) {
+      // Resolve the line by the click's height, not stored positions — the
+      // marker DOM can be a few hundred ms stale between an edit and the
+      // next lint pass.
+      const block = state.view.lineBlockAtHeight(e.clientY - state.view.documentTop);
+      const line = state.view.state.doc.lineAt(block.from);
+      const items = [];
+      forEachDiagnostic(state.view.state, (d, from, to) => {
+        if (from <= line.to && to >= line.from) items.push({ d, from, to });
+      });
+      if (items.length) {
+        e.preventDefault();
+        showDiagnosticPopover(items, `line-${line.from}`, { pinned: true });
+        return;
+      }
+    }
     const g = e.target.closest && e.target.closest(".eddie-gutter-mark");
     let recId = (g && g.dataset.rec) || null;
     if (!recId && state.view && e.target.closest && e.target.closest(".cm-content")) {
@@ -1131,6 +1208,7 @@ function hidePopover() {
   popoverRecId = null;
   popoverKind = null;
   shownDiagKey = null;
+  popoverPinned = false;
 }
 
 function showAnchorPopover(recId) {
