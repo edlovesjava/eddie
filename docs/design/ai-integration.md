@@ -363,6 +363,10 @@ the trace: computed locally, at save/command granularity, never keystrokes.
 2. **Proposals + `/ai` inline** — anchored patches with diff preview under
    `ask`; decision records; threads + Continue-in-chat; observed outcomes
    begin (applied-then-reverted detection against stored snapshots).
+   2.5 — **transform registry**: deterministic edits as a named, growable
+   capability — `/fixall`, `registerTransform` + `/apply`, rule-mapped ✦
+   actions, and the AI-promotion flow with its self-test gate
+   ([transforms.md](transforms.md), ADR-0013).
 3. **Automations + background agents** — automation records, pollers
    emitting external events, one-shot agent runs, the
    "warn me if someone pushes" sentence works end-to-end; per-producer
@@ -374,7 +378,7 @@ the trace: computed locally, at save/command granularity, never keystrokes.
    4.5 — **repetition analysis**: mechanical detectors over the trace
    (frequency, sequence n-grams, recurring edit shapes) emitting candidate
    clusters; the reflection agent names the repetitive task and proposes
-   the remedy (command/plugin, automation, config change, or lesson) as
+   the remedy (command/plugin, transform, automation, config change, or lesson) as
    ordinary cards. Detectors may land earlier as a plugin once trace data
    has accumulated.
 5. **Ambient intent** — budgeted, recommendations-only, off by default.
