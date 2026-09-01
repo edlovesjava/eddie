@@ -504,6 +504,60 @@ registerCommand("note", {
   },
 });
 
+// The paragraph around a position: contiguous non-blank lines. On a blank
+// line, falls back to the previous paragraph (the common case after typing
+// "/ai …" on its own line below what you want changed).
+function paragraphAround(editorState, pos) {
+  const doc = editorState.doc;
+  let line = doc.lineAt(pos);
+  if (!line.text.trim()) {
+    let n = line.number;
+    while (n > 1 && !doc.line(n).text.trim()) n--;
+    if (!doc.line(n).text.trim()) return null;
+    line = doc.line(n);
+  }
+  let start = line.number;
+  let end = line.number;
+  while (start > 1 && doc.line(start - 1).text.trim()) start--;
+  while (end < doc.lines && doc.line(end + 1).text.trim()) end++;
+  return { from: doc.line(start).from, to: doc.line(end).to };
+}
+
+registerCommand("ai", {
+  title: "Ask eddie to edit (your selection, or the current paragraph)",
+  hint: "/ai make this more concise",
+  run: async (args) => {
+    if (!args) return setStatus("usage: /ai <what to do> — e.g. /ai tighten this paragraph");
+    if (!state.view || !state.path) return setStatus("open a file first");
+    const es = state.view.state;
+    const sel = es.selection.main;
+    const range = !sel.empty ? { from: sel.from, to: sel.to } : paragraphAround(es, sel.head);
+    if (!range || range.from === range.to) {
+      return setStatus("select some text or put the cursor in a paragraph, then /ai");
+    }
+    const doc = es.doc.toString();
+    const quote = doc.slice(range.from, range.to);
+    setStatus(`✦ /ai ${args.slice(0, 50)}…`, true);
+    try {
+      const r = await api("POST", "/api/ai/transform", {
+        path: state.path,
+        ask: args,
+        quote,
+        prefix: doc.slice(Math.max(0, range.from - 80), range.from),
+        suffix: doc.slice(range.to, range.to + 80),
+        offset: range.from,
+        outline: buildOutline(doc),
+      });
+      if (!r.record) return setStatus(r.error || "eddie couldn't do that as an edit", true);
+      adoptCard(r.record);
+      showAnchorPopover(r.record.id);
+      setStatus("proposal ready — review the diff");
+    } catch (e) {
+      setStatus(`/ai failed: ${e.message}`, true);
+    }
+  },
+});
+
 registerCommand("settings", {
   title: "Open Eddie settings",
   hint: "~/.eddie/config.json",
@@ -1295,19 +1349,21 @@ function slugify(heading) {
     .replace(/\s+/g, "-");
 }
 
+// Heading outline gives the model the document facts some tasks need —
+// e.g. MD051 (valid link fragments) is unfixable from the snippet alone.
+function buildOutline(doc) {
+  if (state.language !== "markdown") return [];
+  return (doc.match(/^#{1,6}\s+.+$/gm) || []).slice(0, 60).map((h) => {
+    const text = h.replace(/^#{1,6}\s+/, "");
+    return `#${slugify(text)}  (${text})`;
+  });
+}
+
 // AI-generated fix for rules without deterministic fixInfo.
 async function proposeAiFix(diag, view, from) {
   const line = view.state.doc.lineAt(from);
   const doc = view.state.doc.toString();
-  // Heading outline gives the model the document facts some rules need —
-  // e.g. MD051 (valid link fragments) is unfixable from the snippet alone.
-  const outline =
-    state.language === "markdown"
-      ? (doc.match(/^#{1,6}\s+.+$/gm) || []).slice(0, 60).map((h) => {
-          const text = h.replace(/^#{1,6}\s+/, "");
-          return `#${slugify(text)}  (${text})`;
-        })
-      : [];
+  const outline = buildOutline(doc);
   setStatus("✦ asking eddie for a fix…", true);
   try {
     const r = await api("POST", "/api/ai/fix", {

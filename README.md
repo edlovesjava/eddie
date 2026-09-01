@@ -98,6 +98,13 @@ In the editor:
   filterable command palette that works the same way. `/link` opens a
   Finder-style file picker and inserts a relative markdown link to the chosen
   doc. Plugins add their own commands via `eddie.registerCommand`
+- **`/ai <ask>`** — AI editing where you're typing. `/ai make this more
+  concise` + Enter targets your **selection** (use the palette to keep one)
+  or, typed inline, the **paragraph at the cursor**. The result is a
+  proposal pinned to that text — red/green diff, Apply, 👍/👎 — never a
+  direct edit (same `ai.edit` policy as lint fixes). Question-shaped asks
+  are declined with a pointer to Chat; edits trace the full
+  run → proposal → decision → applied chain
 
 ## Slash command examples
 
