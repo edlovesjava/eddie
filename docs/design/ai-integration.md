@@ -321,6 +321,36 @@ Capture starts in Phase 1 (outcome kind + 👍/👎 + dismissal tracking) even
 though distillation arrives later — by the time the reflection agent exists
 it has months of labeled episodes to learn from.
 
+### Repetition analysis — noticing the task the user shouldn't have
+
+Serving priority #1 directly: the trace already records every command run,
+save, applied fix, and git action with timestamps and doc context, so
+**repetitive work is a query over data we already collect**. Two layers:
+
+1. **Mechanical detectors (no AI)** run over the trace on a schedule or on
+   demand: frequency counts within a window ("MD009 fixed 14 times this
+   week", "the same commit-message shape typed daily"), action-sequence
+   n-grams ("`/table` is always followed by the same header edits"), and
+   recurring edit shapes (similar quotes patched across files). Detectors
+   emit candidate clusters as trace events — cheap, local, explainable.
+2. **The reflection agent names the task and proposes the remedy.** Given a
+   cluster, it describes the repetitive task in a sentence and proposes the
+   cheapest remedy that eliminates it — every remedy type already exists in
+   this architecture:
+   - a **slash command or plugin** ("you insert a dated heading most
+     mornings — want a `/daily` command?") via the capability builder;
+   - an **automation** (trigger + instruction record);
+   - a **config change** ("you apply every MD009 fix — enable
+     format-on-save trimming?" / a policy flip to `auto`);
+   - or a **lesson**, when the fix is guidance rather than tooling.
+
+Remedies arrive as ordinary recommendation/proposal cards — judged with
+👍/👎, subject to acceptance-stat throttling, fully traceable ("why is this
+suggested?" walks to the episodes that evidence the repetition). Detectors
+can ship once Phase 1 data has accumulated; remedy proposals need the
+capability builder and automations (Phases 3–4). Same privacy boundaries as
+the trace: computed locally, at save/command granularity, never keystrokes.
+
 ## Phasing (each phase ships something usable)
 
 1. **Trace log + SSE + recommend panel** — the log with envelope/kinds, the
@@ -341,6 +371,12 @@ it has months of labeled episodes to learn from.
    become operators; capability-builder flow; quote-based re-anchoring for
    persistence; the reflection agent + `/reflect` distilling lessons, and
    lesson injection into agent runs.
+   4.5 — **repetition analysis**: mechanical detectors over the trace
+   (frequency, sequence n-grams, recurring edit shapes) emitting candidate
+   clusters; the reflection agent names the repetitive task and proposes
+   the remedy (command/plugin, automation, config change, or lesson) as
+   ordinary cards. Detectors may land earlier as a plugin once trace data
+   has accumulated.
 5. **Ambient intent** — budgeted, recommendations-only, off by default.
 
 ## ADR candidates (written as each phase lands)

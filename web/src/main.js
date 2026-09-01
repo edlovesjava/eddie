@@ -13,7 +13,7 @@ import { javascript } from "@codemirror/legacy-modes/mode/javascript";
 import { css as cssMode } from "@codemirror/legacy-modes/mode/css";
 import { html as htmlMode } from "@codemirror/legacy-modes/mode/xml";
 import { oneDark } from "@codemirror/theme-one-dark";
-import { linter, openLintPanel, closeLintPanel, forceLinting, diagnosticCount, forEachDiagnostic } from "@codemirror/lint";
+import { linter, lintGutter, openLintPanel, closeLintPanel, forceLinting, diagnosticCount, forEachDiagnostic } from "@codemirror/lint";
 import { jsonParseLinter } from "@codemirror/lang-json";
 import { lint as markdownlint } from "markdownlint/sync";
 import { marked } from "marked";
