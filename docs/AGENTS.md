@@ -103,6 +103,11 @@ prompted it.
 - `POST /api/ai/fix` with `{path, quote, prefix?, suffix?, offset?, rule?,
   message}` → runs the local AI CLI on the snippet and creates such a
   proposal (used by the lint "✦ ask eddie" action).
+- `POST /api/ai/transform` with `{path, ask, quote, prefix?, suffix?,
+  offset?, outline?}` → applies a freeform instruction to the target text
+  and creates a proposal (used by the `/ai` command). Both AI edit
+  endpoints reply `{ok: false, noFix: true}` when no genuine edit could
+  be produced.
 - `POST /api/recommend/settle` with `{id, how: applied|dismissed|resolved}`
 
 User feedback (👍/👎) arrives as `outcome` records whose `cause` points at
