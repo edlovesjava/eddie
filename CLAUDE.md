@@ -38,7 +38,10 @@ Claude session working in this repo.
 - Commits: imperative subject line; body explains what and why. No model
   identifiers in commits.
 - Version: bump minor in `package.json` when a user-visible capability
-  ships; patch for fixes. Docs-only changes don't bump.
+  ships; patch for fixes. Docs-only changes don't bump. After any bump run
+  `npm install --package-lock-only` and commit the lockfile too — its
+  version fields mirror `package.json`, and a stale lock makes every
+  `npm install`/`eddie upgrade` on the user's machine dirty the checkout.
 
 ## Quality gates (before every push)
 

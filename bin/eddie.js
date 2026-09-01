@@ -103,7 +103,10 @@ async function upgrade(port) {
   }
   console.log(`upgrading eddie in ${ROOT}`);
   await run("git", ["pull", "--ff-only"], ROOT);
-  await run("npm", ["install"], ROOT); // the prepare script rebuilds web/dist
+  // npm ci, not npm install: install exactly what's committed and never
+  // rewrite package-lock.json — an upgrade must leave the checkout clean,
+  // or the next pull needs a stash. The prepare script rebuilds web/dist.
+  await run("npm", ["ci"], ROOT);
   await restart(port);
 }
 

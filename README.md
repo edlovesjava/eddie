@@ -32,8 +32,8 @@ bash scripts/install-finder-app.sh
 eddie upgrade
 ```
 
-That's `git pull` + `npm install` (which rebuilds the frontend) + a server
-restart, in one go. Reload any open editor tabs afterward. (Commands also work
+That's `git pull` + `npm ci` (which rebuilds the frontend and never dirties
+`package-lock.json`) + a server restart, in one go. Reload any open editor tabs afterward. (Commands also work
 as flags — `eddie --upgrade` — and a file literally named `upgrade` still
 opens as a file.)
 
