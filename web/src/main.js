@@ -133,7 +133,9 @@ function createView(content) {
         anchorMarks,
         anchorGutterField,
         eddieGutter,
-        lintGutter(),
+        // No lintGutter(): its ⚠ markers duplicated the squiggle on the same
+        // line and carried CM's fragile quick-closing hover popup. Squiggles
+        // + the sticky popover + the ⚠ count + the Lint panel cover it.
         linter(lintSource, {
           delay: 400,
           // CM's native hover tooltip closes the instant the pointer drifts
