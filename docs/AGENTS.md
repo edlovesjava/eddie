@@ -132,10 +132,19 @@ Notes and commit messages carry the human "why":
   The server pipes a composed prompt to the configured CLI (`ai.command`,
   default `claude -p`). Governed by `ai.chat` policy (`never` → 403).
 
-### Plugins
+### Plugins & transforms
 
-- `GET /api/plugins` → `{plugins: [{name, origin, url}], userPluginDir}`
-- Plugin scripts are served at `/plugins/user/<name>` and `/plugins/builtin/<name>`.
+- `GET /api/plugins` → `{plugins: [{name, origin, url}], userPluginDir, userTransformDir}`
+- Plugin scripts are served at `/plugins/user/<name>` and `/plugins/builtin/<name>`;
+  transform files (origin `transform`) at `/plugins/transform/<name>`.
+- `GET /api/transforms` → `{files, userTransformDir, recentUsage}` — the
+  transform registry's server-side view (ADR-0013). A transform is a pure,
+  deterministic rewrite; add one by writing a plain-JS file into
+  `~/.eddie/transforms/` that calls
+  `eddie.registerTransform(name, (text, ctx) => newText | null, meta)` —
+  it loads on the next tab reload and runs via `/apply <name>`. Rich
+  metadata lives in the browser registry; `recentUsage` counts
+  `transform.applied` trace actions in the recent window.
 
 ## Typical agent flows
 
