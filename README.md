@@ -100,6 +100,16 @@ In the editor:
   filterable command palette that works the same way. `/link` opens a
   Finder-style file picker and inserts a relative markdown link to the chosen
   doc. Plugins add their own commands via `eddie.registerCommand`
+- **Transforms** — deterministic edits with no AI involved
+  ([design](docs/design/transforms.md), ADR-0013). **`/fixall`** applies
+  every mechanical lint fix in the document (list renumbering, trailing
+  spaces, heading spacing…) as **one reviewable diff** — the proposal card
+  with Apply. **`/apply <name>`** runs a named transform on your selection,
+  the paragraph at the cursor, or the document: built-ins are
+  `renumber-list`, `sort-list` (`order=desc` to reverse), and `reflow`
+  (`width=80`); bare `/apply` lists what's registered. Drop a plain-JS file
+  in `~/.eddie/transforms/` calling `eddie.registerTransform` to grow the
+  registry — `GET /api/transforms` lists the files and recent usage
 - **`/ai <ask>`** — AI editing where you're typing. `/ai make this more
   concise` + Enter targets your **selection** (use the palette to keep one)
   or, typed inline, the **paragraph at the cursor**. The result is a

@@ -17,6 +17,7 @@ const HOST = "127.0.0.1";
 const WEB_ROOT = path.join(__dirname, "..", "web");
 const EDDIE_HOME = path.join(os.homedir(), ".eddie");
 const USER_PLUGIN_DIR = path.join(EDDIE_HOME, "plugins");
+const USER_TRANSFORM_DIR = path.join(EDDIE_HOME, "transforms");
 const REPO_PLUGIN_DIR = path.join(__dirname, "..", "plugins");
 const RECENT_FILE = path.join(EDDIE_HOME, "recent.json");
 const MAX_RECENT = 30;
@@ -410,7 +411,9 @@ async function touchRecent(file) {
 
 async function listPlugins() {
   const out = [];
-  for (const [origin, dir] of [["user", USER_PLUGIN_DIR], ["builtin", REPO_PLUGIN_DIR]]) {
+  // ~/.eddie/transforms/ files load through the same pipeline (ADR-0013):
+  // a transform file is a plugin that happens to only call registerTransform.
+  for (const [origin, dir] of [["user", USER_PLUGIN_DIR], ["transform", USER_TRANSFORM_DIR], ["builtin", REPO_PLUGIN_DIR]]) {
     try {
       for (const name of await fsp.readdir(dir)) {
         if (name.endsWith(".js")) out.push({ name, origin, url: `/plugins/${origin}/${name}` });
@@ -974,7 +977,22 @@ const api = {
   },
 
   "GET /api/plugins": async (req, res) => {
-    json(res, 200, { plugins: await listPlugins(), userPluginDir: USER_PLUGIN_DIR });
+    json(res, 200, { plugins: await listPlugins(), userPluginDir: USER_PLUGIN_DIR, userTransformDir: USER_TRANSFORM_DIR });
+  },
+
+  // The transform registry's server-side view (ADR-0013): the files in
+  // ~/.eddie/transforms/ plus recent usage counts from the in-memory trace
+  // window. Rich metadata (title, languages, rules) lives in the browser
+  // registry, since it only exists once the files execute.
+  "GET /api/transforms": async (req, res) => {
+    const files = (await listPlugins()).filter((p) => p.origin === "transform");
+    const usage = {};
+    for (const r of trace.query({ kinds: ["action"], limit: 1000 })) {
+      if (r.body && r.body.name === "transform.applied" && r.body.transform) {
+        usage[r.body.transform] = (usage[r.body.transform] || 0) + 1;
+      }
+    }
+    json(res, 200, { files, userTransformDir: USER_TRANSFORM_DIR, recentUsage: usage });
   },
 
   "POST /api/shutdown": async (req, res) => {
@@ -1021,7 +1039,7 @@ const server = http.createServer(async (req, res) => {
 
     if (url.pathname.startsWith("/plugins/")) {
       const [, , origin, name] = url.pathname.split("/");
-      const dir = origin === "user" ? USER_PLUGIN_DIR : REPO_PLUGIN_DIR;
+      const dir = origin === "user" ? USER_PLUGIN_DIR : origin === "transform" ? USER_TRANSFORM_DIR : REPO_PLUGIN_DIR;
       if (name && !name.includes("..") && (await serveStatic(res, path.join(dir, name)))) return;
       return json(res, 404, { ok: false, error: "plugin not found" });
     }
