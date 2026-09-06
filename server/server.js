@@ -11,6 +11,7 @@ const os = require("os");
 const { execFile, spawn } = require("child_process");
 const crypto = require("crypto");
 const trace = require("./trace");
+const history = require("./history");
 
 const PORT = parseInt(process.env.EDDIE_PORT || "4517", 10);
 const HOST = "127.0.0.1";
@@ -117,6 +118,9 @@ const CONFIG_DEFAULTS = {
   },
   lint: {
     gutter: "on", // quiet per-line ⚠ gutter marks: on | off (squiggles only)
+  },
+  history: {
+    days: 30, // keep local save snapshots this long; 0 disables snapshots
   },
 };
 
@@ -462,6 +466,24 @@ const api = {
     const body = JSON.parse((await readBody(req)).toString("utf8"));
     const file = resolvePath(body.path);
     await fsp.mkdir(path.dirname(file), { recursive: true });
+    // Local version history: snapshot what's on disk if eddie has never seen
+    // it (an external edit — otherwise overwriting would lose it), then the
+    // content being saved. Content-addressed and deduped; a snapshot failure
+    // must never fail the save. history.days: 0 turns this off.
+    try {
+      const { config } = await loadEddieConfig(file);
+      if ((config.history || {}).days !== 0) {
+        try {
+          const prev = await fsp.readFile(file, "utf8");
+          await history.snapshot(file, prev, "disk");
+        } catch {
+          /* new file */
+        }
+        await history.snapshot(file, body.content, "save");
+      }
+    } catch (e) {
+      console.error(`history snapshot failed for ${file}: ${e.message}`);
+    }
     await fsp.writeFile(file, body.content, "utf8");
     await touchRecent(file);
     const saveRec = trace.append({
@@ -478,6 +500,20 @@ const api = {
       record: saveRec.id,
       thread: saveRec.thread,
     });
+  },
+
+  // Local version history for one file: newest first. Rows join to trace
+  // save records via the same 16-hex content hash (context.doc.hash).
+  "GET /api/history": async (req, res, url) => {
+    const file = resolvePath(url.searchParams.get("path"));
+    json(res, 200, { path: file, entries: await history.listFor(file) });
+  },
+
+  "GET /api/history/content": async (req, res, url) => {
+    const hash = (url.searchParams.get("hash") || "").replace(/^sha256:/, "");
+    const content = await history.content(hash);
+    if (content == null) return json(res, 404, { ok: false, error: "no snapshot with that hash" });
+    json(res, 200, { hash, content });
   },
 
   "GET /api/list": async (req, res, url) => {
@@ -1063,3 +1099,10 @@ trace.init();
 server.listen(PORT, HOST, () => {
   console.log(`eddie server v${VERSION} listening on http://${HOST}:${PORT}`);
 });
+
+// Prune old local-history snapshots on startup (best-effort, off the
+// request path). Retention comes from the global config's history.days.
+loadEddieConfig(null)
+  .then(({ config }) => history.prune((config.history || {}).days ?? 30))
+  .then((r) => r.removed && console.log(`history: pruned ${r.removed} old snapshot(s)`))
+  .catch((e) => console.error(`history prune failed: ${e.message}`));

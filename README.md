@@ -163,6 +163,14 @@ same for older entries), and commits made outside Eddie are imported with
 their messages — so "what changed and why" is answerable even for files that
 aren't in git.
 
+Saves are also **versions**: every save snapshots the document into local
+history (`~/.eddie/history/`, content-addressed and deduped — git stays the
+real VCS and is never auto-committed). The ⇄ button on any save row in the
+History panel diffs that version against your buffer and can load it back —
+into the buffer, not the file, so you review and Cmd+S to keep it. External
+edits are snapshotted before eddie overwrites them. Retention is
+`"history": {"days": 30}` in `/settings` (`0` disables).
+
 **Recommendations** ride on it: rule producers (e.g. unpushed commits, a
 lint pile-up) surface cards anchored to the relevant UI — a badge appears on
 the feature, the **✦** icon in the status bar shows the count (click it for

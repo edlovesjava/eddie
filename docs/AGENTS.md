@@ -25,6 +25,11 @@ All paths are absolute (a leading `~` is expanded). Responses are JSON.
   - Creates parent directories as needed.
 - `GET /api/list?path=/abs/dir` → `{path, parent, entries: [{name, path, dir, language}]}`
 - `GET /api/recent` → `{recent: [{path, at}]}` — files the user touched recently.
+- `GET /api/history?path=…` → `{entries: [{ts, path, hash, bytes, origin}]}` —
+  local save snapshots for the file, newest first (ADR-0014). `hash` is the
+  same 16-hex content hash save records carry in `context.doc.hash`.
+- `GET /api/history/content?hash=…` → `{hash, content}` — one snapshot's
+  full content. Restore by `PUT /api/file` like any other edit.
 
 ### Git
 
