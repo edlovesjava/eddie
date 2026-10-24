@@ -11,6 +11,7 @@ import { shell } from "@codemirror/legacy-modes/mode/shell";
 import { yaml } from "@codemirror/legacy-modes/mode/yaml";
 import { javascript } from "@codemirror/legacy-modes/mode/javascript";
 import { dirname, basename, linkHref } from "./paths.js";
+import { listKind, toggleList } from "./lists.js";
 import { css as cssMode } from "@codemirror/legacy-modes/mode/css";
 import { html as htmlMode } from "@codemirror/legacy-modes/mode/xml";
 import { oneDark } from "@codemirror/theme-one-dark";
@@ -122,7 +123,7 @@ function createView(content) {
     state: EditorState.create({
       doc: content,
       extensions: [
-        Prec.high(keymap.of([{ key: "Enter", run: maybeRunInlineCommand }])),
+        Prec.high(keymap.of([{ key: "Enter", run: maybeRunInlineCommand }, { key: "/", run: maybeOpenPaletteOnSelection }])),
         basicSetup,
         keymap.of([
           { key: "Mod-s", preventDefault: true, run: () => (save(), true) },
@@ -283,9 +284,51 @@ function insertAtCursor(text) {
   v.focus();
 }
 
+function selectionText() {
+  const v = state.view;
+  if (!v) return "";
+  const r = v.state.selection.main;
+  return v.state.sliceDoc(r.from, r.to);
+}
+
+// Replace the main selection and keep the new text selected, so a command
+// can be re-run on its own output.
+function replaceSelection(text) {
+  const v = state.view;
+  if (!v) return setStatus("open a file first");
+  const r = v.state.selection.main;
+  v.dispatch({
+    changes: { from: r.from, to: r.to, insert: text },
+    selection: { anchor: r.from, head: r.from + text.length },
+  });
+  v.focus();
+}
+
+// Each selection range widened to whole lines; a cursor is its own line.
+// Overlapping ranges are merged so one line is never rewritten twice.
+function selectedLineBlocks(view) {
+  const doc = view.state.doc;
+  const blocks = view.state.selection.ranges
+    .map((r) => ({ from: doc.lineAt(r.from).from, to: doc.lineAt(r.to).to }))
+    .sort((a, b) => a.from - b.from);
+  const out = [];
+  for (const b of blocks) {
+    const last = out[out.length - 1];
+    if (last && b.from <= last.to + 1) last.to = Math.max(last.to, b.to);
+    else out.push(b);
+  }
+  return out;
+}
+
+function hasSelection() {
+  return !!state.view && !state.view.state.selection.main.empty;
+}
+
 function commandCtx() {
   return {
     insert: insertAtCursor,
+    selection: selectionText,
+    replaceSelection,
     view: state.view,
     path: state.path,
     language: state.language,
@@ -323,13 +366,24 @@ function maybeRunInlineCommand(view) {
   return true;
 }
 
+// "/" over a selection opens the palette with the selection intact instead of
+// typing over it. commands.slashOnSelection: "palette" (default) | "text".
+function maybeOpenPaletteOnSelection(view) {
+  if (view.state.selection.main.empty) return false;
+  if ((state.config?.commands?.slashOnSelection || "palette") === "text") return false;
+  openPalette();
+  return true;
+}
+
 // --- command palette (Cmd+K) ---
 
 let paletteSel = 0;
 
 function paletteMatches(query) {
   const q = query.toLowerCase().replace(/^\//, "");
-  return [...commands.values()].filter((c) => c.name.toLowerCase().includes(q) || (c.title || "").toLowerCase().includes(q));
+  const matches = [...commands.values()].filter((c) => c.name.toLowerCase().includes(q) || (c.title || "").toLowerCase().includes(q));
+  if (hasSelection()) matches.sort((a, b) => (b.selection ? 1 : 0) - (a.selection ? 1 : 0));
+  return matches;
 }
 
 function renderPalette() {
@@ -464,6 +518,27 @@ registerCommand("date", {
 registerCommand("hr", {
   title: "Insert a horizontal rule",
   run: (args, ctx) => ctx.insert("\n---\n"),
+});
+
+registerCommand("list", {
+  title: "Toggle bullets on the selected lines",
+  hint: "/list (bullets), /list 1 (numbered), /list [] (checklist)",
+  selection: true,
+  run: (args, ctx) => {
+    const v = ctx.view;
+    if (!v) return ctx.setStatus("open a file first");
+    const kind = listKind(args);
+    const cursorOnly = v.state.selection.ranges.every((r) => r.empty);
+    const blocks = selectedLineBlocks(v);
+    const changes = blocks.map((b) => ({ from: b.from, to: b.to, insert: toggleList(v.state.sliceDoc(b.from, b.to), kind) }));
+    v.dispatch({ changes });
+    // Reselect the rewritten lines so a second /list toggles them back; a
+    // bare cursor just lands after the marker so typing continues the item.
+    const shift = changes.reduce((n, c) => n + c.insert.length - (c.to - c.from), 0);
+    const lastEnd = blocks[blocks.length - 1].to + shift;
+    v.dispatch({ selection: cursorOnly ? { anchor: lastEnd } : { anchor: blocks[0].from, head: lastEnd } });
+    v.focus();
+  },
 });
 
 registerCommand("lint", {

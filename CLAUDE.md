@@ -28,6 +28,10 @@ Claude session working in this repo.
 - **When you make a significant choice** (new dependency, new subsystem, new
   protocol/format, changed default behavior), add an ADR — short, numbered,
   from `docs/adr/template.md`.
+- **Editing behaviors are configurable** (ADR-0015). Anything that changes
+  what a keystroke or gesture does ships with a config key under
+  `CONFIG_DEFAULTS` whose non-default value keeps the old behavior, and the
+  key is documented in the README's Configuration section.
 
 ## Workflow
 
