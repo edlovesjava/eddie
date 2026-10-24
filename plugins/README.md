@@ -66,8 +66,12 @@ eddie.registerPanel("outline", {
 Commands run inline (`/name args` + Enter in the document — the typed command
 is replaced by whatever the command inserts) and from the Cmd+K palette.
 `run(args, ctx)` may be async; `args` is the raw argument string, and `ctx`
-has `insert(text)` (at the cursor, replacing any selection), `view`, `path`,
-`language`, `pickFile`, `api`, and `setStatus`.
+has `insert(text)` (at the cursor, replacing any selection), `selection()`
+(the selected text, `""` if none), `replaceSelection(text)` (swap the
+selection for `text` and keep it selected), `view`, `path`, `language`,
+`pickFile`, `api`, and `setStatus`. Set `selection: true` on a command that
+acts on selected text: the palette lists those first when something is
+selected, which is also what typing `/` over a selection opens.
 
 ```js
 eddie.registerCommand("sig", {

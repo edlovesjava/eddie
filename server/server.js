@@ -122,6 +122,9 @@ const CONFIG_DEFAULTS = {
   history: {
     days: 30, // keep local save snapshots this long; 0 disables snapshots
   },
+  commands: {
+    slashOnSelection: "palette", // "/" typed over a selection: palette (open the command picker) | text (type a slash)
+  },
 };
 
 function parseJsonc(text) {

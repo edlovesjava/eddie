@@ -97,7 +97,11 @@ In the editor:
 - **Slash commands**, inline or from the palette. Type `/table 3x4` (or
   `/link`, `/date`, `/hr`) in the document and hit Enter — the command text is
   replaced by its output. Or press **Cmd+K** (or the `/` toolbar button) for a
-  filterable command palette that works the same way. `/link` opens a
+  filterable command palette that works the same way. With text selected,
+  typing `/` opens the palette over the selection instead of replacing it,
+  with selection-aware commands listed first. `/list` toggles bullets on the
+  selected lines (`/list 1` numbered, `/list []` checklist; run it again to
+  remove them, or on an empty line to start a list). `/link` opens a
   file picker in the current doc's folder and inserts a relative markdown
   link to the chosen doc (absolute if it's on another drive). Plugins add their own commands via `eddie.registerCommand`
 - **Transforms** — deterministic edits with no AI involved
@@ -216,6 +220,9 @@ first use:
 - The config also holds display preferences: `"lint": {"gutter": "on"}`
   (default) shows the quiet per-line ⚠ lint marks in the gutter; `"off"`
   keeps squiggles only.
+- Editing behaviors are configurable too: `"commands": {"slashOnSelection":
+  "palette"}` (default) makes `/` typed over a selection open the command
+  palette; `"text"` types a slash over it like any other key.
 - A `.eddie.json` in a repo (found walking up from the file, like lint
   configs) overrides the global config per project — e.g. put
   `{"git": {"push": "never"}}` in a repo you never want pushed from Eddie.
