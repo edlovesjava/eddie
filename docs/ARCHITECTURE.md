@@ -28,7 +28,7 @@ through the server.
 |---|---|---|
 | CLI | `bin/eddie.js` | health-check → auto-start server → open browser; `upgrade/restart/status/stop` |
 | Server | `server/server.js` | all side effects: file I/O, dir listing, recent files, git, config/policy, AI chat, remote fetch, plugin serving. Plain `node:` modules only |
-| Frontend | `web/src/main.js` (+ `index.html`, `style.css`) | editor, preview, lint, commands, palette, panels, plugin loader |
+| Frontend | `web/src/main.js` (+ `index.html`, `style.css`; pure helpers in sibling modules like `paths.js`, `transforms.js`) | editor, preview, lint, commands, palette, panels, plugin loader |
 | Plugins | `plugins/*.js` (built-in), `~/.eddie/plugins/*.js` (user) | plain scripts loaded into the page; use `window.eddie` |
 | Docs | `README.md` (user), `docs/AGENTS.md` (API), `plugins/README.md` (plugin API), `docs/adr/` (decisions) | keep in sync with changes |
 
@@ -84,7 +84,8 @@ signal to discuss an ADR, not to bolt on a one-off.
 3. Server capability that mutates state? Add a `CONFIG_DEFAULTS` policy
    entry and enforce `never` in the handler.
 4. Test for real: `curl` the endpoints, drive the UI headless (Playwright),
-   check the failure path.
+   check the failure path. Pure frontend helpers get a `*.test.js` beside
+   them (`node:test`, run with `npm test`).
 5. Update docs: README / AGENTS.md / plugins/README.md as applicable;
    ADR if a significant decision was made; minor version bump if a
    user-visible capability shipped.
