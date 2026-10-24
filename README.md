@@ -100,6 +100,16 @@ In the editor:
   filterable command palette that works the same way. `/link` opens a
   Finder-style file picker and inserts a relative markdown link to the chosen
   doc. Plugins add their own commands via `eddie.registerCommand`
+- **Transforms** — deterministic edits with no AI involved
+  ([design](docs/design/transforms.md), ADR-0013). **`/fixall`** applies
+  every mechanical lint fix in the document (list renumbering, trailing
+  spaces, heading spacing…) as **one reviewable diff** — the proposal card
+  with Apply. **`/apply <name>`** runs a named transform on your selection,
+  the paragraph at the cursor, or the document: built-ins are
+  `renumber-list`, `sort-list` (`order=desc` to reverse), and `reflow`
+  (`width=80`); bare `/apply` lists what's registered. Drop a plain-JS file
+  in `~/.eddie/transforms/` calling `eddie.registerTransform` to grow the
+  registry — `GET /api/transforms` lists the files and recent usage
 - **`/ai <ask>`** — AI editing where you're typing. `/ai make this more
   concise` + Enter targets your **selection** (use the palette to keep one)
   or, typed inline, the **paragraph at the cursor**. The result is a
@@ -152,6 +162,14 @@ attaches a note to your last save (the 💬 button on any History row does the
 same for older entries), and commits made outside Eddie are imported with
 their messages — so "what changed and why" is answerable even for files that
 aren't in git.
+
+Saves are also **versions**: every save snapshots the document into local
+history (`~/.eddie/history/`, content-addressed and deduped — git stays the
+real VCS and is never auto-committed). The ⇄ button on any save row in the
+History panel diffs that version against your buffer and can load it back —
+into the buffer, not the file, so you review and Cmd+S to keep it. External
+edits are snapshotted before eddie overwrites them. Retention is
+`"history": {"days": 30}` in `/settings` (`0` disables).
 
 **Recommendations** ride on it: rule producers (e.g. unpushed commits, a
 lint pile-up) surface cards anchored to the relevant UI — a badge appears on

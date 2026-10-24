@@ -25,6 +25,11 @@ All paths are absolute (a leading `~` is expanded). Responses are JSON.
   - Creates parent directories as needed.
 - `GET /api/list?path=/abs/dir` → `{path, parent, entries: [{name, path, dir, language}]}`
 - `GET /api/recent` → `{recent: [{path, at}]}` — files the user touched recently.
+- `GET /api/history?path=…` → `{entries: [{ts, path, hash, bytes, origin}]}` —
+  local save snapshots for the file, newest first (ADR-0014). `hash` is the
+  same 16-hex content hash save records carry in `context.doc.hash`.
+- `GET /api/history/content?hash=…` → `{hash, content}` — one snapshot's
+  full content. Restore by `PUT /api/file` like any other edit.
 
 ### Git
 
@@ -132,10 +137,19 @@ Notes and commit messages carry the human "why":
   The server pipes a composed prompt to the configured CLI (`ai.command`,
   default `claude -p`). Governed by `ai.chat` policy (`never` → 403).
 
-### Plugins
+### Plugins & transforms
 
-- `GET /api/plugins` → `{plugins: [{name, origin, url}], userPluginDir}`
-- Plugin scripts are served at `/plugins/user/<name>` and `/plugins/builtin/<name>`.
+- `GET /api/plugins` → `{plugins: [{name, origin, url}], userPluginDir, userTransformDir}`
+- Plugin scripts are served at `/plugins/user/<name>` and `/plugins/builtin/<name>`;
+  transform files (origin `transform`) at `/plugins/transform/<name>`.
+- `GET /api/transforms` → `{files, userTransformDir, recentUsage}` — the
+  transform registry's server-side view (ADR-0013). A transform is a pure,
+  deterministic rewrite; add one by writing a plain-JS file into
+  `~/.eddie/transforms/` that calls
+  `eddie.registerTransform(name, (text, ctx) => newText | null, meta)` —
+  it loads on the next tab reload and runs via `/apply <name>`. Rich
+  metadata lives in the browser registry; `recentUsage` counts
+  `transform.applied` trace actions in the recent window.
 
 ## Typical agent flows
 

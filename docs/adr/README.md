@@ -20,3 +20,4 @@ made (new dependency, subsystem, protocol, changed default). Use
 | [0011](0011-anchored-recommendations.md) | Recommendations are annotations — anchored by content, not coordinates | accepted |
 | [0012](0012-proposals-and-decisions.md) | Mutations offered by rules/AI are proposals — patch, decision, applied action | accepted |
 | [0013](0013-transform-registry.md) | Deterministic transforms are a registered capability; AI-created ones join the registry with provenance | accepted |
+| [0014](0014-local-history-snapshots.md) | Local version history is content-addressed save snapshots; git stays the VCS | accepted |

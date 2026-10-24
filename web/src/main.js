@@ -16,6 +16,8 @@ import { oneDark } from "@codemirror/theme-one-dark";
 import { linter, openLintPanel, closeLintPanel, forceLinting, diagnosticCount, forEachDiagnostic, setDiagnosticsEffect } from "@codemirror/lint";
 import { jsonParseLinter } from "@codemirror/lang-json";
 import { lint as markdownlint } from "markdownlint/sync";
+import { applyFixes } from "markdownlint";
+import { builtinTransforms } from "./transforms.js";
 import { marked } from "marked";
 
 const $ = (id) => document.getElementById(id);
@@ -575,6 +577,133 @@ registerCommand("settings", {
       setStatus(`created ${data.globalPath}`);
     }
     window.open(`/?file=${encodeURIComponent(data.globalPath)}`, "_blank");
+  },
+});
+
+// ---------- transforms (ADR-0013, docs/design/transforms.md) ----------
+//
+// A transform is a pure, deterministic rewrite: (text, ctx) => newText |
+// null, no LLM, no network. `text` is the targeted slice; null means "not
+// applicable / nothing to change". Built-ins ship in transforms.js; user
+// and AI-created ones are plain-JS files in ~/.eddie/transforms/ that load
+// like plugins and call eddie.registerTransform. Human-invoked transforms
+// (/apply) edit directly and are traced; machine-invoked ones must go
+// through the proposal machinery instead.
+
+const transforms = new Map();
+
+function registerTransform(name, fn, meta = {}) {
+  transforms.set(String(name).toLowerCase(), { name: String(name).toLowerCase(), fn, meta });
+}
+
+for (const [name, fn, meta] of builtinTransforms) registerTransform(name, fn, meta);
+
+registerCommand("apply", {
+  title: "Apply a transform (selection, paragraph, or document)",
+  hint: "/apply renumber-list — bare /apply lists what's registered",
+  run: async (args) => {
+    if (!state.view) return setStatus("open a file first");
+    const [name, ...rest] = args.split(/\s+/).filter(Boolean);
+    if (!name) {
+      const names = [...transforms.keys()].sort();
+      return setStatus(names.length ? `transforms: ${names.join(", ")}` : "no transforms registered", true);
+    }
+    const t = transforms.get(name.toLowerCase());
+    if (!t) return setStatus(`no transform named ${name} — bare /apply lists them`, true);
+    const params = {};
+    for (const kv of rest) {
+      const i = kv.indexOf("=");
+      if (i > 0) params[kv.slice(0, i)] = kv.slice(i + 1);
+    }
+    const es = state.view.state;
+    const sel = es.selection.main;
+    let range, scope;
+    if (t.meta.scope === "doc") {
+      range = { from: 0, to: es.doc.length };
+      scope = "doc";
+    } else if (!sel.empty) {
+      range = { from: sel.from, to: sel.to };
+      scope = "selection";
+    } else {
+      const p = paragraphAround(es, sel.head);
+      if (p && p.from < p.to) {
+        range = p;
+        scope = "paragraph";
+      } else {
+        range = { from: 0, to: es.doc.length };
+        scope = "doc";
+      }
+    }
+    const text = es.doc.sliceString(range.from, range.to);
+    let out;
+    try {
+      out = t.fn(text, { path: state.path, language: state.language, scope, params });
+    } catch (e) {
+      return setStatus(`${t.name} failed: ${e.message}`, true);
+    }
+    if (out == null || out === text) return setStatus(`${t.name}: nothing to change`);
+    state.view.dispatch({ changes: { from: range.from, to: range.to, insert: out } });
+    api("POST", "/api/trace", {
+      kind: "action",
+      context: state.path ? { doc: { path: state.path } } : {},
+      body: { name: "transform.applied", transform: t.name, scope, origin: t.meta.origin || "user", params },
+    }).catch(() => {});
+    setStatus(`applied ${t.name} (${scope})`);
+  },
+});
+
+registerCommand("fixall", {
+  title: "Fix every deterministic lint issue in one diff (no AI)",
+  hint: "/fixall — review the combined diff, then Apply",
+  run: async () => {
+    if (!state.view || !state.path) return setStatus("open a file first");
+    if (state.language !== "markdown") return setStatus("/fixall currently supports markdown only");
+    let cfg = { default: true };
+    const l = (state.linters.markdown || []).find((x) => x.name === "markdownlint");
+    try {
+      const config = l && (await resolveLinterConfig(l));
+      if (config && config.content != null) cfg = parseJsonc(config.content);
+    } catch {
+      /* bad config -> defaults, same as the linter */
+    }
+    const text = getText();
+    const errors = markdownlint({ strings: { doc: text }, config: cfg }).doc.filter((e) => e.fixInfo);
+    if (!errors.length) return setStatus("nothing deterministically fixable");
+    const fixed = applyFixes(text, errors);
+    if (fixed === text) return setStatus("nothing deterministically fixable");
+    // One proposal covering the minimal changed region: trim the common
+    // prefix/suffix so the diff card shows only what changes.
+    let p = 0;
+    while (p < text.length && p < fixed.length && text[p] === fixed[p]) p++;
+    let s = 0;
+    while (s < Math.min(text.length, fixed.length) - p && text[text.length - 1 - s] === fixed[fixed.length - 1 - s]) s++;
+    if (p === text.length - s) {
+      // pure insertion: the quote can't be empty, so widen by one char
+      if (p > 0) p -= 1;
+      else s = Math.max(0, s - 1);
+    }
+    const target = {
+      path: state.path,
+      quote: text.slice(p, text.length - s),
+      prefix: text.slice(Math.max(0, p - 32), p),
+      suffix: text.slice(text.length - s, text.length - s + 32),
+      offset: p,
+    };
+    const rules = [...new Set(errors.map((e) => e.ruleNames[0]))];
+    try {
+      const r = await api("POST", "/api/recommend", {
+        producer: "fixall",
+        anchor: { type: "doc", path: target.path, quote: target.quote, prefix: target.prefix, suffix: target.suffix, offset: target.offset },
+        severity: "notice",
+        text: `fix ${errors.length} lint issue${errors.length > 1 ? "s" : ""} (${rules.join(", ")})`,
+        patch: { ...target, replacement: fixed.slice(p, fixed.length - s) },
+      });
+      adoptCard(r.record);
+      showAnchorPopover(r.record.id);
+      setStatus(`${errors.length} fixes in one diff — review and Apply`);
+    } catch (e) {
+      setStatus(`/fixall failed: ${e.message}`, true);
+    }
   },
 });
 
@@ -1656,9 +1785,88 @@ async function renderHistory() {
       renderHistory();
     };
     row.append(kind, summary, note, meta);
+    // Saves are versions: every file.saved record's content hash joins a
+    // local-history snapshot, so the row can diff/restore that exact state.
+    if (r.body.name === "file.saved" && r.context && r.context.doc && r.context.doc.hash) {
+      const ver = document.createElement("button");
+      ver.className = "fb";
+      ver.textContent = "⇄";
+      ver.title = "compare this saved version with the buffer (and restore it)";
+      ver.onclick = (e) => {
+        e.stopPropagation();
+        if (r.body.path !== state.path) return setStatus(`open ${r.body.path} first`, true);
+        showVersionDiff(r);
+      };
+      row.insertBefore(ver, note);
+    }
     row.onclick = () => showChain(r.id, list, renderHistory);
     list.appendChild(row);
   }
+}
+
+// ---- local version history (snapshots on save; server /api/history) ----
+
+function trimmedHunk(a, b) {
+  let p = 0;
+  while (p < a.length && p < b.length && a[p] === b[p]) p++;
+  let s = 0;
+  while (s < Math.min(a.length, b.length) - p && a[a.length - 1 - s] === b[b.length - 1 - s]) s++;
+  return { del: a.slice(p, a.length - s), ins: b.slice(p, b.length - s) };
+}
+
+async function showVersionDiff(r) {
+  let snap;
+  try {
+    ({ content: snap } = await api("GET", `/api/history/content?hash=${encodeURIComponent(r.context.doc.hash)}`));
+  } catch {
+    return setStatus("no snapshot stored for this save (predates local history?)", true);
+  }
+  const cur = getText();
+  if (snap === cur) return setStatus("this version is identical to the current buffer");
+  hidePopover();
+  popoverKind = "rec"; // diag hover must not replace it
+  popoverEl = document.createElement("div");
+  popoverEl.className = "eddie-popover";
+  const card = document.createElement("div");
+  card.className = "rec-card passive";
+  const title = document.createElement("div");
+  title.textContent = `saved version · ${new Date(r.ts).toLocaleString()}`;
+  const { del, ins } = trimmedHunk(cur, snap);
+  const clip = (t) => (t.length > 1200 ? t.slice(0, 1200) + " …" : t || "(nothing)");
+  const diff = document.createElement("div");
+  diff.className = "patch-diff";
+  const d = document.createElement("div");
+  d.className = "del";
+  d.textContent = clip(del);
+  const i = document.createElement("div");
+  i.className = "ins";
+  i.textContent = clip(ins);
+  diff.append(d, i);
+  const actions = document.createElement("div");
+  actions.className = "rec-actions";
+  const load = document.createElement("button");
+  load.textContent = "Load this version";
+  load.onclick = () => {
+    setText(snap);
+    setStatus("version loaded into the buffer — Cmd+S to keep it, Cmd+Z to go back", true);
+    api("POST", "/api/trace", {
+      kind: "action",
+      cause: [r.id],
+      context: { doc: { path: state.path, hash: r.context.doc.hash } },
+      body: { name: "version.loaded", path: state.path },
+    }).catch(() => {});
+    hidePopover();
+  };
+  const close = document.createElement("button");
+  close.className = "fb";
+  close.textContent = "✕";
+  close.title = "close";
+  close.onclick = hidePopover;
+  actions.append(load, close);
+  card.append(title, diff, actions);
+  popoverEl.appendChild(card);
+  document.body.appendChild(popoverEl);
+  positionPopover(null);
 }
 
 // Render a cause chain ("why?") into a container, with a back link.
@@ -1977,6 +2185,7 @@ const eddie = {
   registerFormatter,
   registerLinter,
   registerCommand,
+  registerTransform,
   runCommand,
   pickFile,
   registerPanel,

@@ -11,12 +11,14 @@ const os = require("os");
 const { execFile, spawn } = require("child_process");
 const crypto = require("crypto");
 const trace = require("./trace");
+const history = require("./history");
 
 const PORT = parseInt(process.env.EDDIE_PORT || "4517", 10);
 const HOST = "127.0.0.1";
 const WEB_ROOT = path.join(__dirname, "..", "web");
 const EDDIE_HOME = path.join(os.homedir(), ".eddie");
 const USER_PLUGIN_DIR = path.join(EDDIE_HOME, "plugins");
+const USER_TRANSFORM_DIR = path.join(EDDIE_HOME, "transforms");
 const REPO_PLUGIN_DIR = path.join(__dirname, "..", "plugins");
 const RECENT_FILE = path.join(EDDIE_HOME, "recent.json");
 const MAX_RECENT = 30;
@@ -116,6 +118,9 @@ const CONFIG_DEFAULTS = {
   },
   lint: {
     gutter: "on", // quiet per-line ⚠ gutter marks: on | off (squiggles only)
+  },
+  history: {
+    days: 30, // keep local save snapshots this long; 0 disables snapshots
   },
 };
 
@@ -410,7 +415,9 @@ async function touchRecent(file) {
 
 async function listPlugins() {
   const out = [];
-  for (const [origin, dir] of [["user", USER_PLUGIN_DIR], ["builtin", REPO_PLUGIN_DIR]]) {
+  // ~/.eddie/transforms/ files load through the same pipeline (ADR-0013):
+  // a transform file is a plugin that happens to only call registerTransform.
+  for (const [origin, dir] of [["user", USER_PLUGIN_DIR], ["transform", USER_TRANSFORM_DIR], ["builtin", REPO_PLUGIN_DIR]]) {
     try {
       for (const name of await fsp.readdir(dir)) {
         if (name.endsWith(".js")) out.push({ name, origin, url: `/plugins/${origin}/${name}` });
@@ -459,6 +466,24 @@ const api = {
     const body = JSON.parse((await readBody(req)).toString("utf8"));
     const file = resolvePath(body.path);
     await fsp.mkdir(path.dirname(file), { recursive: true });
+    // Local version history: snapshot what's on disk if eddie has never seen
+    // it (an external edit — otherwise overwriting would lose it), then the
+    // content being saved. Content-addressed and deduped; a snapshot failure
+    // must never fail the save. history.days: 0 turns this off.
+    try {
+      const { config } = await loadEddieConfig(file);
+      if ((config.history || {}).days !== 0) {
+        try {
+          const prev = await fsp.readFile(file, "utf8");
+          await history.snapshot(file, prev, "disk");
+        } catch {
+          /* new file */
+        }
+        await history.snapshot(file, body.content, "save");
+      }
+    } catch (e) {
+      console.error(`history snapshot failed for ${file}: ${e.message}`);
+    }
     await fsp.writeFile(file, body.content, "utf8");
     await touchRecent(file);
     const saveRec = trace.append({
@@ -475,6 +500,20 @@ const api = {
       record: saveRec.id,
       thread: saveRec.thread,
     });
+  },
+
+  // Local version history for one file: newest first. Rows join to trace
+  // save records via the same 16-hex content hash (context.doc.hash).
+  "GET /api/history": async (req, res, url) => {
+    const file = resolvePath(url.searchParams.get("path"));
+    json(res, 200, { path: file, entries: await history.listFor(file) });
+  },
+
+  "GET /api/history/content": async (req, res, url) => {
+    const hash = (url.searchParams.get("hash") || "").replace(/^sha256:/, "");
+    const content = await history.content(hash);
+    if (content == null) return json(res, 404, { ok: false, error: "no snapshot with that hash" });
+    json(res, 200, { hash, content });
   },
 
   "GET /api/list": async (req, res, url) => {
@@ -974,7 +1013,22 @@ const api = {
   },
 
   "GET /api/plugins": async (req, res) => {
-    json(res, 200, { plugins: await listPlugins(), userPluginDir: USER_PLUGIN_DIR });
+    json(res, 200, { plugins: await listPlugins(), userPluginDir: USER_PLUGIN_DIR, userTransformDir: USER_TRANSFORM_DIR });
+  },
+
+  // The transform registry's server-side view (ADR-0013): the files in
+  // ~/.eddie/transforms/ plus recent usage counts from the in-memory trace
+  // window. Rich metadata (title, languages, rules) lives in the browser
+  // registry, since it only exists once the files execute.
+  "GET /api/transforms": async (req, res) => {
+    const files = (await listPlugins()).filter((p) => p.origin === "transform");
+    const usage = {};
+    for (const r of trace.query({ kinds: ["action"], limit: 1000 })) {
+      if (r.body && r.body.name === "transform.applied" && r.body.transform) {
+        usage[r.body.transform] = (usage[r.body.transform] || 0) + 1;
+      }
+    }
+    json(res, 200, { files, userTransformDir: USER_TRANSFORM_DIR, recentUsage: usage });
   },
 
   "POST /api/shutdown": async (req, res) => {
@@ -1021,7 +1075,7 @@ const server = http.createServer(async (req, res) => {
 
     if (url.pathname.startsWith("/plugins/")) {
       const [, , origin, name] = url.pathname.split("/");
-      const dir = origin === "user" ? USER_PLUGIN_DIR : REPO_PLUGIN_DIR;
+      const dir = origin === "user" ? USER_PLUGIN_DIR : origin === "transform" ? USER_TRANSFORM_DIR : REPO_PLUGIN_DIR;
       if (name && !name.includes("..") && (await serveStatic(res, path.join(dir, name)))) return;
       return json(res, 404, { ok: false, error: "plugin not found" });
     }
@@ -1045,3 +1099,10 @@ trace.init();
 server.listen(PORT, HOST, () => {
   console.log(`eddie server v${VERSION} listening on http://${HOST}:${PORT}`);
 });
+
+// Prune old local-history snapshots on startup (best-effort, off the
+// request path). Retention comes from the global config's history.days.
+loadEddieConfig(null)
+  .then(({ config }) => history.prune((config.history || {}).days ?? 30))
+  .then((r) => r.removed && console.log(`history: pruned ${r.removed} old snapshot(s)`))
+  .catch((e) => console.error(`history prune failed: ${e.message}`));
