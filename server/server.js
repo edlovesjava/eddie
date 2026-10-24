@@ -15,6 +15,17 @@ const history = require("./history");
 
 const PORT = parseInt(process.env.EDDIE_PORT || "4517", 10);
 const HOST = "127.0.0.1";
+const ALLOWED_HOST_SUFFIXES = [
+  process.env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN,
+  ...(process.env.EDDIE_ALLOW_HOSTS || "").split(","),
+]
+  .map((s) => (s || "").trim())
+  .filter(Boolean);
+
+function hostAllowed(host) {
+  if (host === "127.0.0.1" || host === "localhost" || host === "::1") return true;
+  return ALLOWED_HOST_SUFFIXES.some((suf) => host === suf || host.endsWith(`.${suf}`));
+}
 const WEB_ROOT = path.join(__dirname, "..", "web");
 const EDDIE_HOME = path.join(os.homedir(), ".eddie");
 const USER_PLUGIN_DIR = path.join(EDDIE_HOME, "plugins");
@@ -1062,9 +1073,13 @@ async function serveStatic(res, file) {
 // ---------- request routing ----------
 
 const server = http.createServer(async (req, res) => {
-  // Guard against DNS rebinding: only accept requests addressed to localhost.
+  // Guard against DNS rebinding: only accept requests addressed to
+  // localhost — plus hosts under the Codespaces port-forwarding domain when
+  // running in a codespace (the forwarded request keeps its public Host
+  // header; GitHub authenticates it before it reaches us), plus any
+  // EDDIE_ALLOW_HOSTS suffixes (comma-separated) the user opts into.
   const host = (req.headers.host || "").split(":")[0];
-  if (host !== "127.0.0.1" && host !== "localhost") {
+  if (!hostAllowed(host)) {
     return json(res, 403, { ok: false, error: "forbidden host" });
   }
 

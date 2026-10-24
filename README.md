@@ -8,9 +8,10 @@ an AI agent over a local HTTP API.
 Eddie is intentionally small: a dependency-free Node server, a CodeMirror 6
 frontend, and a plugin folder. It's *my* editor — it does the things I do.
 
-## Install (macOS)
+## Install
 
-Requires Node 18+ (`brew install node`).
+Runs anywhere Node 18+ and git run: macOS, Linux, Windows (Git Bash or
+WSL), and GitHub Codespaces.
 
 ```bash
 git clone https://github.com/edlovesjava/eddie.git
@@ -19,12 +20,23 @@ npm install          # also builds the frontend bundle
 npm link             # puts `eddie` on your PATH
 ```
 
-Optional Finder integration (creates `~/Applications/Eddie.app` so you can
-right-click → Open With → Eddie):
+Platform notes:
 
-```bash
-bash scripts/install-finder-app.sh
-```
+- **macOS** — optional Finder integration (creates `~/Applications/Eddie.app`
+  so you can right-click → Open With → Eddie):
+  `bash scripts/install-finder-app.sh`
+- **GitHub Codespaces** — the repo ships a devcontainer: create a codespace
+  and eddie is installed on first boot. `eddie README.md` opens the editor
+  in your real browser through the forwarded port (GitHub authenticates the
+  forwarded URL; eddie's host guard recognizes the codespaces domain
+  automatically). Port 4517 is pre-forwarded.
+- **Windows** — use Git Bash or WSL. `eddie <file>` opens your default
+  Windows browser (`cmd /c start` natively; `wslview`/`explorer.exe` under
+  WSL). Everything else is the same.
+- Browser opening honors `$BROWSER` everywhere, and if nothing works eddie
+  prints the URL to open by hand. Behind another proxy/tunnel, allow its
+  hostname with `EDDIE_ALLOW_HOSTS=my.tunnel.dev` (comma-separated
+  suffixes) — requests to unknown hosts are refused (DNS-rebinding guard).
 
 ## Upgrade
 

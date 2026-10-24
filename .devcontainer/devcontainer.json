@@ -1,0 +1,12 @@
+{
+  "name": "eddie",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:20",
+  "postCreateCommand": "npm ci && npm link",
+  "forwardPorts": [4517],
+  "portsAttributes": {
+    "4517": {
+      "label": "eddie",
+      "onAutoForward": "silent"
+    }
+  }
+}

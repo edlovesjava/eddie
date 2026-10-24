@@ -63,11 +63,29 @@ async function ensureServer(port) {
 }
 
 function openBrowser(url) {
-  const cmd =
-    process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
-  const child = spawn(cmd, [url], { detached: true, stdio: "ignore" });
-  child.on("error", () => console.log(`open this in your browser: ${url}`));
-  child.unref();
+  const fallback = () => console.log(`open this in your browser: ${url}`);
+  const tryCmd = (cmd, args, onError) => {
+    const child = spawn(cmd, [...args, url], { detached: true, stdio: "ignore" });
+    child.on("error", onError);
+    child.unref();
+  };
+  // $BROWSER first: Codespaces points it at a helper that opens the
+  // forwarded port in your real browser; many Linux setups define it too.
+  if (process.env.BROWSER) return tryCmd(process.env.BROWSER, [], fallback);
+  if (process.platform === "darwin") return tryCmd("open", [], fallback);
+  // `start` is a cmd.exe builtin, not an executable (the empty string is the
+  // window-title argument it would otherwise eat the URL for).
+  if (process.platform === "win32") return tryCmd("cmd", ["/c", "start", ""], fallback);
+  // Linux. Under WSL there is usually no xdg-open target; wslview (wslu) or
+  // explorer.exe reach the Windows-side default browser.
+  let isWsl = false;
+  try {
+    isWsl = fs.readFileSync("/proc/version", "utf8").toLowerCase().includes("microsoft");
+  } catch {
+    /* not linux-like */
+  }
+  if (isWsl) return tryCmd("wslview", [], () => tryCmd("explorer.exe", [], fallback));
+  tryCmd("xdg-open", [], fallback);
 }
 
 function run(cmd, args, cwd) {
