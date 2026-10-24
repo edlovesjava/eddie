@@ -10,6 +10,7 @@ import { StreamLanguage } from "@codemirror/language";
 import { shell } from "@codemirror/legacy-modes/mode/shell";
 import { yaml } from "@codemirror/legacy-modes/mode/yaml";
 import { javascript } from "@codemirror/legacy-modes/mode/javascript";
+import { dirname, basename, linkHref } from "./paths.js";
 import { css as cssMode } from "@codemirror/legacy-modes/mode/css";
 import { html as htmlMode } from "@codemirror/legacy-modes/mode/xml";
 import { oneDark } from "@codemirror/theme-one-dark";
@@ -99,10 +100,6 @@ function setDirty(d) {
   state.dirty = d;
   $("dirty").hidden = !d;
   document.title = (d ? "● " : "") + (state.path ? basename(state.path) : "eddie");
-}
-
-function basename(p) {
-  return p.split("/").pop();
 }
 
 // ---------- editor ----------
@@ -388,7 +385,7 @@ let pickResolve = null;
 
 function pickFile(startDir) {
   $("linkpick").hidden = false;
-  pickBrowse(startDir || dirname(state.path || "~"));
+  pickBrowse(startDir || (state.path ? dirname(state.path) : ""));
   return new Promise((resolve) => (pickResolve = resolve));
 }
 
@@ -427,21 +424,6 @@ async function pickBrowse(dir) {
   }
 }
 
-// --- path helpers ---
-
-function dirname(p) {
-  const i = p.lastIndexOf("/");
-  return i > 0 ? p.slice(0, i) : "/";
-}
-
-function relPath(fromDir, to) {
-  const a = fromDir.split("/").filter(Boolean);
-  const b = to.split("/").filter(Boolean);
-  let i = 0;
-  while (i < a.length && a[i] === b[i]) i++;
-  return [...Array(a.length - i).fill(".."), ...b.slice(i)].join("/") || ".";
-}
-
 // --- built-in commands ---
 
 registerCommand("link", {
@@ -450,8 +432,8 @@ registerCommand("link", {
   run: async (args, ctx) => {
     const target = await ctx.pickFile();
     if (!target) return;
-    const label = target.split("/").pop().replace(/\.[^.]+$/, "");
-    const href = state.path ? relPath(dirname(state.path), target) : target;
+    const label = basename(target).replace(/\.[^.]+$/, "");
+    const href = linkHref(state.path, target);
     ctx.insert(`[${label}](${encodeURI(href)})`);
   },
 });

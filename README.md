@@ -98,8 +98,8 @@ In the editor:
   `/link`, `/date`, `/hr`) in the document and hit Enter — the command text is
   replaced by its output. Or press **Cmd+K** (or the `/` toolbar button) for a
   filterable command palette that works the same way. `/link` opens a
-  Finder-style file picker and inserts a relative markdown link to the chosen
-  doc. Plugins add their own commands via `eddie.registerCommand`
+  file picker in the current doc's folder and inserts a relative markdown
+  link to the chosen doc (absolute if it's on another drive). Plugins add their own commands via `eddie.registerCommand`
 - **Transforms** — deterministic edits with no AI involved
   ([design](docs/design/transforms.md), ADR-0013). **`/fixall`** applies
   every mechanical lint fix in the document (list renumbering, trailing

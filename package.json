@@ -1,6 +1,6 @@
 {
   "name": "eddie-editor",
-  "version": "0.11.0",
+  "version": "0.11.1",
   "description": "Eddie — a fast, personal, browser-based editor for markup files (Markdown, JSON, bash), with git built in and an agent-friendly API.",
   "license": "MIT",
   "author": "Ed Wentworth",
@@ -9,6 +9,7 @@
     "eddie": "bin/eddie.js"
   },
   "scripts": {
+    "test": "node --test \"web/src/**/*.test.js\"",
     "build": "esbuild web/src/main.js --bundle --format=iife --outfile=web/dist/app.js --minify",
     "dev": "esbuild web/src/main.js --bundle --format=iife --outfile=web/dist/app.js --watch",
     "start": "node server/server.js",

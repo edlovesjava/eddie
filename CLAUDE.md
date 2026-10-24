@@ -45,7 +45,7 @@ Claude session working in this repo.
 
 ## Quality gates (before every push)
 
-- `node --check server/server.js` and `npm run build` must pass.
+- `node --check server/server.js`, `npm test`, and `npm run build` must pass.
 - Exercise what you changed for real: `curl` new/changed API endpoints, and
   drive UI changes in headless Chromium (Playwright is the established
   pattern — see the smoke tests in past sessions). Verify the failure path,
